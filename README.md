@@ -1,3 +1,6 @@
+**CS 4273 Capstone Design Project Fall 2026**  
+**Group L**
+
 # Virtual Client Telehealth Simulation Platform
 
 An interactive, mock-telehealth training platform designed for social work students and early-career therapists to practice clinical interview skills, establish rapport, navigate resistance, and respond to safety cues in an auditable, HIPAA-compliant simulation environment.
