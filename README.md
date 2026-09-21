@@ -57,6 +57,19 @@ To support real-time user input, structured intent classification, canvas-based 
 
 ---
 
+## Running the Practice Room UI
+
+The foundation UI shell (Option 2: Next.js 15 + React + Tailwind) lives at the repository root.
+
+```bash
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) — you will be redirected to `/practice`. Activity labels in the welcome room navigate to Feelings, Whiteboard, and Chess screens (tools are visual only for now).
+
+---
+
 ## Goals & Progress Plan
 
 
