@@ -111,6 +111,14 @@ public/                      # Static images and avatars
 
 ---
 
+**2026-09-28 — LLM-backed chat with a server-side transcript**
+Context: The Chat activity was a placeholder; the virtual client needs to reply to the learner and every exchange must be logged.
+Decision: `POST /api/chat` calls Anthropic or OpenAI with plain `fetch` (no SDK), keys only in `.env.local`, with a mock provider when no key is set. Each session is a JSON transcript in `data/transcripts/` (git-ignored), written through `lib/chat/transcriptStore.ts`. See `docs/chat-api.md`.
+Rationale: The key never reaches the browser; LLM history is rebuilt from the stored transcript, so the log is authoritative; a per-session lock keeps `seq` strictly ordered.
+Gotcha: This is unconstrained LLM dialogue, unlike the planned deterministic dialogue tree. Persona text in `lib/chat/persona.ts` is a placeholder pending research-team scenarios. File storage won't persist on serverless hosts, and the transcript endpoints have no auth yet.
+
+---
+
 **2026-09-21 — Use Excalidraw for the initial whiteboard**
 Context: The repository had a visual-only whiteboard placeholder with a custom toolbar, while the feature requires drawing, typing, color selection, and erasing.
 Decision: Embed `@excalidraw/excalidraw` in the existing `/practice/whiteboard` route using a client-only component.
