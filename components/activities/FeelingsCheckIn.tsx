@@ -1,21 +1,14 @@
 "use client";
 
 import { useState } from "react";
-
-const FEELINGS = [
-  { label: "Calm", color: "#88A294", eyes: "M16 25 Q20 28 24 25 M32 25 Q36 28 40 25", mouth: "M21 35 Q28 39 35 35", prompt: "What is helping you feel calm?" },
-  { label: "Happy", color: "#E8C84A", mouth: "M18 33 Q28 48 38 33 Z", prompt: "What brought you joy today?" },
-  { label: "Excited", color: "#E8A060", eyes: "M16 24 Q20 15 24 24 M32 24 Q36 15 40 24", mouth: "M19 31 Q28 50 37 31 Z", brows: "M16 15 L23 13 M33 13 L40 15", prompt: "What are you excited about?" },
-  { label: "Proud", color: "#B07AC9", eyes: "M16 24 Q20 19 24 24 M32 24 Q36 19 40 24", mouth: "M20 34 Q28 43 38 32", brows: "M16 16 L23 16 M33 16 L40 16", prompt: "What is something you feel proud of?" },
-  { label: "Worried", color: "#7BA3C9", mouth: "M20 38 Q28 31 36 38", brows: "M15 19 L24 15 M32 15 L41 19", prompt: "What is on your mind right now?" },
-  { label: "Sad", color: "#6B8FB8", eyes: "M17 26 L23 27 M33 27 L39 26", mouth: "M19 40 Q28 29 37 40", brows: "M16 19 L24 16 M32 16 L40 19", prompt: "What has been making you feel sad?" },
-  { label: "Angry", color: "#D65A4A", mouth: "M19 40 Q28 30 37 40", brows: "M15 16 L24 21 M32 21 L41 16", prompt: "What happened that made you feel angry?" },
-  { label: "Frustrated", color: "#E89060", eyes: "M16 23 L24 26 L16 28 M40 23 L32 26 L40 28", mouth: "M19 37 L24 35 L29 38 L34 35 L38 37", brows: "M16 16 L23 19 M33 19 L40 16", prompt: "What feels difficult or stuck right now?" },
-  { label: "Tired", color: "#9B7AB8", eyes: "M16 26 L24 26 M32 26 L40 26", mouth: "M24 35 C24 30 32 30 32 35 C32 43 24 43 24 35 Z", prompt: "What kind of rest would feel helpful?" },
-  { label: "Lonely", color: "#88A294", eyes: "M18 28 L22 28 M34 28 L38 28", mouth: "M23 39 Q28 34 33 39", brows: "M16 20 Q20 21 24 17 M32 17 Q36 21 40 20", prompt: "Who would you like to feel more connected to?" },
-  { label: "Hopeful", color: "#E8C84A", mouth: "M21 35 Q28 43 35 35", brows: "M16 16 Q20 12 24 16 M32 16 Q36 12 40 16", prompt: "What is something you are looking forward to?" },
-  { label: "Unsure", color: "#E8A060", mouth: "M20 37 Q25 33 29 37 Q33 41 37 36", brows: "M16 17 L24 17 M32 16 Q37 11 41 16", prompt: "What are you feeling uncertain about?" },
-] as const;
+import {
+  MOOD_OPTIONS,
+  parseMoodAgentAction,
+  type MoodAgentAction,
+  type MoodId,
+} from "@/lib/mood/moodTypes";
+import { requestMockAgentMood } from "@/lib/mood/mockAgent";
+import { AnnotationToolbar } from "./AnnotationToolbar";
 
 type Feeling = (typeof FEELINGS)[number];
 
@@ -33,29 +26,106 @@ function FeelingFace({ feeling }: { feeling: Feeling }) {
 }
 
 export function FeelingsCheckIn() {
-  const [selected, setSelected] = useState<Feeling | null>(null);
+  const [selectedMoodId, setSelectedMoodId] = useState<MoodId | null>(null);
+  const [agentAction, setAgentAction] = useState<MoodAgentAction | null>(null);
+  const [isRequesting, setIsRequesting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleGetAgentMood = async () => {
+    setIsRequesting(true);
+    setError(null);
+
+    try {
+      const response = await requestMockAgentMood();
+      const action = parseMoodAgentAction(response);
+      setSelectedMoodId(action.moodId);
+      setAgentAction(action);
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "AI Bot mood request failed",
+      );
+    } finally {
+      setIsRequesting(false);
+    }
+  };
+
+  const selectedMood = MOOD_OPTIONS.find(
+    (mood) => mood.id === selectedMoodId,
+  );
 
   return (
-    <div className="h-full overflow-y-auto bg-charcoal p-3 sm:p-6">
-      <div className="mx-auto w-full max-w-2xl rounded-panel bg-white p-5 shadow-sm sm:px-10 sm:py-8">
-        <h1 className="text-2xl font-semibold text-charcoal">How are you feeling?</h1>
-        <p id="feelings-instructions" className="mt-1 text-sm text-charcoal/60">Select a feeling to talk about. All feelings are welcome.</p>
-        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4" role="group" aria-label="Feelings" aria-describedby="feelings-instructions">
-          {FEELINGS.map((feeling) => {
-            const active = selected?.label === feeling.label;
-            return (
-              <button type="button" key={feeling.label} aria-pressed={active}
-                onClick={() => setSelected(active ? null : feeling)}
-                className={`relative flex min-h-28 min-w-0 flex-col items-center justify-center gap-2 rounded-panel border-2 p-3 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-charcoal ${active ? "border-sage bg-sage/10" : "border-transparent hover:border-sage/50 hover:bg-cream"}`}>
-                {active && <span aria-hidden="true" className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-charcoal text-xs text-white">✓</span>}
-                <FeelingFace feeling={feeling} />
-                <span className="text-sm text-charcoal">{feeling.label}</span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="mt-6 rounded-panel bg-cream p-4" role="status" aria-live="polite" aria-atomic="true">
-          {selected ? <><p className="font-medium text-charcoal">You selected: {selected.label}</p><p className="mt-1 text-sm text-charcoal/80">{selected.prompt}</p></> : <p className="text-sm text-charcoal/70">Choose the feeling that best fits right now.</p>}
+    <div className="flex h-full bg-charcoal">
+      <div className="flex min-w-0 flex-1 items-center justify-center p-8">
+        <div className="w-full max-w-2xl rounded-panel bg-white px-10 py-8 shadow-sm">
+          <h1 className="text-2xl font-semibold text-charcoal">
+            How are you feeling?
+          </h1>
+          <p className="mt-1 text-sm text-charcoal/60">
+            Select a feeling to talk about.
+          </p>
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleGetAgentMood}
+              disabled={isRequesting}
+              className="rounded-panel bg-sage px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isRequesting ? "Getting mood…" : "TEMP Get Agent Mood"}
+            </button>
+            {isRequesting && (
+              <span className="text-sm text-charcoal/60" role="status">
+                AI Bot is choosing a mood…
+              </span>
+            )}
+          </div>
+
+          {error && (
+            <p
+              className="mt-4 rounded-panel border border-terracotta/30 bg-terracotta/10 px-4 py-3 text-sm text-charcoal"
+              role="alert"
+            >
+              {error}
+            </p>
+          )}
+
+          {agentAction && selectedMood && (
+            <div
+              className="mt-4 rounded-panel border border-sage/30 bg-sage/10 px-4 py-3"
+              aria-live="polite"
+            >
+              <p className="text-sm font-semibold text-charcoal">
+                AI Bot selected: {selectedMood.label}
+              </p>
+              <p className="mt-1 text-sm text-charcoal/70">
+                {agentAction.rationale}
+              </p>
+            </div>
+          )}
+
+          <div className="mt-8 grid grid-cols-4 gap-x-6 gap-y-8">
+            {MOOD_OPTIONS.map((feeling) => {
+              const selected = selectedMoodId === feeling.id;
+              return (
+                <div
+                  key={feeling.id}
+                  data-mood-id={feeling.id}
+                  className={`relative flex flex-col items-center gap-2 rounded-panel p-2 ${
+                    selected ? "ring-2 ring-sage" : ""
+                  }`}
+                >
+                  {selected && (
+                    <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-sage text-xs text-white">
+                      ✓
+                    </span>
+                  )}
+                  <FeelingFace color={feeling.color} />
+                  <span className="text-sm text-charcoal">{feeling.label}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
         <button type="button" onClick={() => setSelected(null)} disabled={!selected} className="mt-3 rounded-panel border border-charcoal/30 px-3 py-2 text-sm text-charcoal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-charcoal disabled:opacity-40">Clear selection</button>
       </div>
