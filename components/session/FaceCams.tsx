@@ -8,7 +8,7 @@ export function FaceCams({ darkRail = false }: { darkRail?: boolean }) {
       }`}
     >
       <Cam src="/avatar-you.png" label="You" darkRail={darkRail} />
-      <Cam src="/avatar-alex.png" label="Alex" darkRail={darkRail} />
+      <Cam src="/avatar-alex.png" label="AI Bot" darkRail={darkRail} />
     </aside>
   );
 }

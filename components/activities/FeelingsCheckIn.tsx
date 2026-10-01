@@ -1,19 +1,14 @@
-import { AnnotationToolbar } from "./AnnotationToolbar";
+"use client";
 
-const FEELINGS = [
-  { label: "Calm", color: "#88A294" },
-  { label: "Happy", color: "#E8C84A" },
-  { label: "Excited", color: "#E8A060" },
-  { label: "Proud", color: "#B07AC9" },
-  { label: "Worried", color: "#7BA3C9", selected: true },
-  { label: "Sad", color: "#6B8FB8" },
-  { label: "Angry", color: "#D65A4A" },
-  { label: "Frustrated", color: "#E89060" },
-  { label: "Tired", color: "#9B7AB8" },
-  { label: "Lonely", color: "#88A294" },
-  { label: "Hopeful", color: "#E8C84A" },
-  { label: "Unsure", color: "#E8A060" },
-] as const;
+import { useState } from "react";
+import {
+  MOOD_OPTIONS,
+  parseMoodAgentAction,
+  type MoodAgentAction,
+  type MoodId,
+} from "@/lib/mood/moodTypes";
+import { requestMockAgentMood } from "@/lib/mood/mockAgent";
+import { AnnotationToolbar } from "./AnnotationToolbar";
 
 function FeelingFace({ color }: { color: string }) {
   return (
@@ -33,6 +28,35 @@ function FeelingFace({ color }: { color: string }) {
 }
 
 export function FeelingsCheckIn() {
+  const [selectedMoodId, setSelectedMoodId] = useState<MoodId | null>(null);
+  const [agentAction, setAgentAction] = useState<MoodAgentAction | null>(null);
+  const [isRequesting, setIsRequesting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleGetAgentMood = async () => {
+    setIsRequesting(true);
+    setError(null);
+
+    try {
+      const response = await requestMockAgentMood();
+      const action = parseMoodAgentAction(response);
+      setSelectedMoodId(action.moodId);
+      setAgentAction(action);
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "AI Bot mood request failed",
+      );
+    } finally {
+      setIsRequesting(false);
+    }
+  };
+
+  const selectedMood = MOOD_OPTIONS.find(
+    (mood) => mood.id === selectedMoodId,
+  );
+
   return (
     <div className="flex h-full bg-charcoal">
       <div className="flex min-w-0 flex-1 items-center justify-center p-8">
@@ -43,12 +67,52 @@ export function FeelingsCheckIn() {
           <p className="mt-1 text-sm text-charcoal/60">
             Select a feeling to talk about.
           </p>
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleGetAgentMood}
+              disabled={isRequesting}
+              className="rounded-panel bg-sage px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isRequesting ? "Getting mood…" : "TEMP Get Agent Mood"}
+            </button>
+            {isRequesting && (
+              <span className="text-sm text-charcoal/60" role="status">
+                AI Bot is choosing a mood…
+              </span>
+            )}
+          </div>
+
+          {error && (
+            <p
+              className="mt-4 rounded-panel border border-terracotta/30 bg-terracotta/10 px-4 py-3 text-sm text-charcoal"
+              role="alert"
+            >
+              {error}
+            </p>
+          )}
+
+          {agentAction && selectedMood && (
+            <div
+              className="mt-4 rounded-panel border border-sage/30 bg-sage/10 px-4 py-3"
+              aria-live="polite"
+            >
+              <p className="text-sm font-semibold text-charcoal">
+                AI Bot selected: {selectedMood.label}
+              </p>
+              <p className="mt-1 text-sm text-charcoal/70">
+                {agentAction.rationale}
+              </p>
+            </div>
+          )}
+
           <div className="mt-8 grid grid-cols-4 gap-x-6 gap-y-8">
-            {FEELINGS.map((feeling) => {
-              const selected = "selected" in feeling && feeling.selected;
+            {MOOD_OPTIONS.map((feeling) => {
+              const selected = selectedMoodId === feeling.id;
               return (
                 <div
-                  key={feeling.label}
+                  key={feeling.id}
+                  data-mood-id={feeling.id}
                   className={`relative flex flex-col items-center gap-2 rounded-panel p-2 ${
                     selected ? "ring-2 ring-sage" : ""
                   }`}
