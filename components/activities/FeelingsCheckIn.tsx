@@ -10,19 +10,17 @@ import {
 import { requestMockAgentMood } from "@/lib/mood/mockAgent";
 import { AnnotationToolbar } from "./AnnotationToolbar";
 
-function FeelingFace({ color }: { color: string }) {
+type Feeling = (typeof FEELINGS)[number];
+
+function FeelingFace({ feeling }: { feeling: Feeling }) {
   return (
-    <svg width="56" height="56" viewBox="0 0 56 56" aria-hidden>
-      <circle cx="28" cy="28" r="26" fill={color} stroke="#293C35" strokeWidth="2" />
-      <circle cx="20" cy="24" r="2.5" fill="#293C35" />
-      <circle cx="36" cy="24" r="2.5" fill="#293C35" />
-      <path
-        d="M20 36 Q28 42 36 36"
-        fill="none"
-        stroke="#293C35"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
+    <svg className="h-14 w-14 shrink-0 sm:h-16 sm:w-16" viewBox="0 0 56 56" aria-hidden="true" focusable="false">
+      <circle cx="28" cy="28" r="26" fill={feeling.color} stroke="#293C35" strokeWidth="2" />
+      <g fill="none" stroke="#293C35" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        {"eyes" in feeling ? <path d={feeling.eyes} /> : <g fill="#293C35" stroke="none"><circle cx="20" cy={feeling.label === "Hopeful" ? 22 : 24} r="2.5" /><circle cx="36" cy={feeling.label === "Hopeful" ? 22 : 24} r="2.5" /></g>}
+        {"brows" in feeling && <path d={feeling.brows} />}
+        <path d={feeling.mouth} fill={feeling.label === "Happy" || feeling.label === "Excited" || feeling.label === "Tired" ? "#293C35" : "none"} />
+      </g>
     </svg>
   );
 }
@@ -129,8 +127,8 @@ export function FeelingsCheckIn() {
             })}
           </div>
         </div>
+        <button type="button" onClick={() => setSelected(null)} disabled={!selected} className="mt-3 rounded-panel border border-charcoal/30 px-3 py-2 text-sm text-charcoal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-charcoal disabled:opacity-40">Clear selection</button>
       </div>
-      <AnnotationToolbar />
     </div>
   );
 }

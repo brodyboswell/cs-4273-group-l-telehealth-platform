@@ -58,7 +58,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) — you will be redirected to `/practice`. Activity labels in the welcome room navigate to Feelings, Whiteboard, and Chess screens. The Whiteboard is interactive; the other activity tools remain visual-only for now.
+Open [http://localhost:3000](http://localhost:3000) — you will be redirected to `/practice`. Activity labels in the welcome room navigate to Feelings, Whiteboard, and Chess screens. The Whiteboard, Chess, and Feelings activities are interactive. Feelings offers twelve distinct facial expressions, selectable feelings with discussion prompts, and a clear-selection control. The feeling selection resets when leaving the activity or refreshing. Chess supports two players on the same device: select a piece, then a highlighted legal destination. It includes promotion choices, check/checkmate and draw detection, move history, undo, and a new-game button. Chess games are held in memory and reset when leaving the activity or refreshing; computer opponents and remote multiplayer are not included.
 
 ---
 
