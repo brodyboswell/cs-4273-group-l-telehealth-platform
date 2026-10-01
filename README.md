@@ -1,88 +1,73 @@
-**CS 4273 Capstone Design Project Fall 2026**  
-**Group L**
-
 # Virtual Client Telehealth Simulation Platform
 
-An interactive, mock-telehealth training platform designed for social work students and early-career therapists to practice clinical interview skills, establish rapport, navigate resistance, and respond to safety cues in an auditable, HIPAA-compliant simulation environment.
+**CS 4273 Capstone Design Project, Fall 2026 · Group L**
 
----
+A prototype for social work students and early-career therapists to practice interviewing a virtual client and use interactive activities inside a simulated telehealth room.
 
-## Project Description
+## Run locally
 
-Practicing clinical interviews and navigating challenging client dynamics typically requires live actors or real clients, introducing high logistical barriers and strict HIPAA constraints. This platform provides a safe, reproducible virtual client simulation where social work learners practice interviewing techniques through open-ended dialogue and interactive clinical tools.
-
-Using a hybrid partial-AI architecture, student dialogue is mapped to structured decision-tree branches to maintain deterministic clinical accuracy, avoid hallucinations, and enforce rigorous rubric-based evaluation while preserving natural conversational flow.
-
----
-
-## Key Features
-
-### 1. Interaction & Response Logging
-
-- **Full Audit Trail:** Captures every student input and virtual client output in chronological order with microsecond timestamps.
-- **Deterministic Dialogue Tree:** Routes student text to clinically pre-approved virtual client dialogue nodes, avoiding unconstrained AI generation.
-- **Session Metadata:** Records state transitions, active node history, and latency metrics for downstream grading and research review.
-
-### 2. Automated AI & Rubric Evaluation
-
-- **Objective Rubric Scoring:** Grades student performance against standardized clinical criteria (e.g., general A/B/C benchmarks and decision-point pass/fail triggers).
-- **Safety Cue Recognition:** Flags whether a student appropriately acknowledged high-risk signals (such as bullying or self-harm statements) or bypassed critical intervention points.
-- **Actionable Feedback:** Identifies missed opportunities to validate emotion, de-escalate resistance, or deploy clinical tools at optimal junctures.
-
-### 3. Integrated Telehealth Tools
-
-- **Interactive Whiteboard:** A shared visual canvas supporting real-time freehand drawing, typing, color selection, and erasing to facilitate co-participation exercises.
-- **Emotion Check-In Sheet:** An emoji- and face-selection sheet where the virtual client circles, crosses out, or highlights feelings to express emotional state.
-- **Structured Chess:** A game-based engagement tool supporting therapist-set behavioral rules (e.g., requiring the client to reflect or answer a question before each move) to address client deflection and resistance.
-
----
-
-## Identified Technologies & Candidate Stacks
-
-To support real-time user input, structured intent classification, canvas-based visual tools, and deterministic state transitions, three candidate technology stacks are under consideration:
-
-| Stack Option         | Frontend Architecture                                         | Backend Architecture                                                                   | Strengths & Tradeoffs                                                                                     |
-| -------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| **Python Stack**     | • React 19 (Vite) • Tailwind CSS • HTML5 Canvas API           | • Python (FastAPI) • Pydantic / Instructor • Custom State Machine Engine               | Excellent native data science and LLM tool compatibility; decoupled client-server development.            |
-| **TypeScript Stack** | • Next.js 15 (React) • Tailwind CSS • Fabric.js / React-Konva | • Node.js (Next.js Handlers / Fastify) • Zod + Vercel AI SDK • XState v5 (FSM)         | End-to-end type safety, unified language across stack, and enterprise-grade state machine management.     |
-| **JavaScript Stack** | • React 18 (Vite) • Tailwind CSS • HTML5 Canvas API           | • Node.js (Express.js) • OpenAI Node SDK (Structured Outputs) • Robot / Machina.js FSM | Fast prototyping, low onboarding overhead, but lacks compile-time type validation across complex schemas. |
-
----
-
-## Running the Practice Room UI
-
-The foundation UI shell (Option 2: Next.js 15 + React + Tailwind) lives at the repository root.
+Use Node.js 20 or newer and npm:
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) — you will be redirected to `/practice`. Activity labels in the welcome room navigate to Feelings, Whiteboard, and Chess screens. The Whiteboard, Chess, and Feelings activities are interactive. Feelings offers twelve distinct facial expressions, selectable feelings with discussion prompts, and a clear-selection control. The feeling selection resets when leaving the activity or refreshing. Chess supports two players on the same device: select a piece, then a highlighted legal destination. It includes promotion choices, check/checkmate and draw detection, move history, undo, and a new-game button. Chess games are held in memory and reset when leaving the activity or refreshing; computer opponents and remote multiplayer are not included.
+Open [localhost:3000](http://localhost:3000). The app redirects to `/practice`.
 
----
+## Current features
 
-## Goals & Progress Plan
+- **Room:** Click the illustrated whiteboard, feelings chart, or chessboard to open an activity. Drag the objects to rearrange them; arrow keys move a focused object.
+- **Whiteboard:** Draw, erase, move objects, write text, and create shapes with labeled tools, ink colors, line sizes, undo, and redo. Excalidraw loads only in the browser.
+- **Feelings:** Select one of twelve feelings or draw over the board. Drawings have ink colors, undo, and clear controls.
+- **Chess:** Two players on the same device can click or drag pieces to legal destinations. Includes promotion, game-over detection, move history, undo, and reset.
+- **Chat:** Talk to Alex using an offline mock or a configured Anthropic/OpenAI provider. The server stores an ordered transcript of learner messages, client replies, and errors; transcripts can be downloaded as JSON or text.
 
-### Project Goals
+Room positions, feelings drawings, whiteboard scenes, and chess games are local activity state and reset when leaving their routes. They are not yet synchronized or added to the session log. Settings, snapshot, remote client control, and ending a session are prototype UI placeholders.
 
-- **Practical Clinical Training:** Enable social work learners to gain hands-on interview experience in a controlled telehealth environment.
-- **Dynamic Skill Assessment:** Teach learners to establish rapport, navigate client resistance, validate emotional cues, and deploy clinical tools appropriately.
-- **Standardized Rubric Evaluation:** Assess learner performance automatically against decision-point criteria and general rubrics developed by social work research partners.
-- **Zero HIPAA Risk:** Provide high-fidelity, case-based simulation without the data privacy hazards or consent requirements of real-world patient records.
+## Checks
 
-### Progress Plan & Milestones
-
-```mermaid
-flowchart LR
-    A["<b>Early Sept</b><br>Project Scope &<br>Architecture"] --> B["<b>Oct. 2</b><br>Foundation Prototype<br>(Tree + UI Shell)"]
-    B --> C["<b>(Nov. 13) November</b><br>Advanced Prototype<br>(Tools + Scoring)"]
-    C --> D["<b>(Nov. 27) Late Nov</b><br>Learner Testing &<br>Feedback Loops"]
-    D --> E["<b>(Dec. 4) December</b><br>Final Deliverable<br>(Research & Academic)"]
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
 ```
 
-- **Early September — Project Finalization:** Finalize architecture selection (Option 2), define technical stack, and document core system requirements.
-- **Late September / Early October — Foundation Prototype:** Implement basic chat/text interface, decision-tree execution logic, and initial client state management.
-- **November — Advanced Prototype:** Integrate 2–3 interactive tools (Whiteboard, Emotion Check-In, Chess) and deploy automated rubric-based feedback scoring.
-- **Late November — Learner Evaluation & Feedback:** Conduct user-testing sessions with social work students; gather usability data and evaluate intent classification accuracy.
-- **December — Final Deliverable:** Deliver production-ready release candidate supporting both academic project benchmarks and academic research deployment.
+Application regression tests use Node's test runner with `tsx`. They create isolated temporary transcripts and mock provider requests, so they never call paid providers or modify saved practice sessions. The first production build needs network access for the existing Google Fonts setup.
+
+The original Python, JavaScript, and TypeScript exercises remain under `unit-tests/`. With Python 3 installed, run:
+
+```bash
+npm ci --prefix unit-tests/typescript
+npm run test:exercises
+```
+
+## Stack and layout
+
+Next.js 15 App Router, React 19, TypeScript, Tailwind CSS, Excalidraw, and chess.js.
+
+| Directory | Purpose |
+|---|---|
+| `app/` | Pages, layouts, and chat/transcript API routes |
+| `components/activities/` | Room, feelings, whiteboard, and chess UI |
+| `components/session/` | Shared header, participants, and toolbar |
+| `components/chat/` | Chat interface |
+| `lib/chat/` | Persona, provider requests, validation, and file-backed transcripts |
+| `tests/` | Application regression tests |
+| `unit-tests/` | Original cross-stack exercises |
+| `public/` | Participant avatars and room artwork |
+| `docs/` | API details, architecture, artwork provenance, and original UI references |
+
+## Chat setup and limits
+
+Copy `.env.example` to `.env.local` and configure a provider key if needed. With no key, chat uses deterministic canned replies. See [the chat API documentation](docs/chat-api.md) for configuration, endpoints, and transcript details.
+
+The current chat uses a placeholder persona and unconstrained LLM replies, not the planned deterministic dialogue tree. Transcript endpoints have no authentication, and file storage is intended for a local prototype; it does not persist on serverless hosts. Locks serialize requests only within one server process.
+
+## Planned work
+
+- Research-approved scenarios and a deterministic dialogue tree.
+- Authenticated sessions and persistent transcript storage.
+- Ordered activity logs and replay, separate from the canvas renderer.
+- Remote collaboration and rubric-based feedback.

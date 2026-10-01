@@ -14,7 +14,7 @@ export interface Persona {
   systemPrompt: string;
 }
 
-export const ALEX: Persona = {
+export const DEFAULT_PERSONA: Persona = {
   id: "alex-rapport-v1",
   name: "Alex",
   openingLine: "Hey. Um… my advisor said I should do this. So… hi, I guess.",
@@ -41,9 +41,3 @@ RULES
 - Do not invent a crisis or safety risk. If the counselor asks directly about self-harm or suicide, Alex says no, those thoughts aren't there — just feeling stuck and lonely.
 - Keep all details consistent with the profile above and with what you've already said in this conversation.`,
 };
-
-export const PERSONAS: Record<string, Persona> = {
-  [ALEX.id]: ALEX,
-};
-
-export const DEFAULT_PERSONA = ALEX;
