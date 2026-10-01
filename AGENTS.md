@@ -18,6 +18,9 @@ Open `http://localhost:3000`; the app redirects to `/practice`.
 
 **Tests and checks:**
 ```bash
+npm run lint
+npm run typecheck
+npm test
 npm run build
 ```
 
@@ -108,6 +111,37 @@ public/                      # Static images and avatars
 ## Decisions & Gotchas Log
 
 *Append-only. Add new entries at the top.*
+
+---
+
+**2026-10-01 — Repository cleanup and regression checks**
+Context: Repository review found unused prototype code, per-pointer chess history recomputation, drawing redraw overhead, stale chat request races, and inconsistent transcript error handling.
+Decision: Remove the unused annotation rail, old raster avatars, unused feeling prompts/persona registry, and unused toolbar spacing token. Cache chess derivations per position and use chess.js move/undo history directly. Batch feelings drawing updates by animation frame. Share chat validation, abort stale transcript loads, reconcile uncertain sends with the server log, validate stored/provider data, return consistent uncached JSON errors, and bound transcript archive reads. Add ESLint, typecheck, and isolated Node/tsx regression tests; explicitly scope Next.js file tracing to the repository.
+Rationale: Reduces unnecessary work while preserving the session UI and activity behavior; regression checks cover ordered logs, corrupt files, storage failures, and provider parsing. Original exercises and design/artwork provenance remain in the repository. Patch updates and dependency overrides address pinned transitive advisories without replacing the framework or editor.
+Gotcha: Transcript locks are process-local. Authentication and shared durable storage still require separate implementation before using multiple server instances.
+
+---
+
+**2026-10-01 — Child-friendly whiteboard controls and simpler avatars**
+Context: The default editor's unlabeled tools, shortcut numbers, and canvas instructions were confusing; participant artwork needed a cleaner style.
+Decision: Replace Excalidraw's advanced tool chrome with six labeled tools, ink swatches, and a line-size picker through its public imperative API. Start with drawing active and keep native undo/redo with visible labels. Scope editor CSS to the whiteboard; simplify the two existing avatar SVGs using consistent flat shapes and facial features.
+Rationale: Keeps the editor's drawing, text, selection, erasing, and history behavior while making everyday controls easier to identify. No generated raster images or external avatar service is required.
+Gotcha: The scoped chrome and history-label CSS depends on Excalidraw 0.18.1 class names; check desktop and mobile controls after upgrades.
+
+---
+
+**2026-10-01 — Restore the warm room and simplify activity chrome**
+Context: Client feedback preferred the original comforting room illustration and a quieter interface, with a larger chessboard and obvious click affordances.
+Decision: Use an edited original room background and transparent activity artwork instead of the flat SVG room. Keep object drag behavior, use pointer cursors on hover and grabbing only during a drag, and show activity labels on hover/focus. Remove static rapport/time and redundant activity text. Share consistent line icons and render chess pieces as SVG; size the board against its available container with responsive controls.
+Rationale: Retains the original visual character and existing interactions while reducing clutter and making better use of screen space.
+
+---
+
+**2026-10-01 — Direct activity interaction and pointer dragging**
+Context: The baked-in welcome-room image produced a browser drag ghost and only its labels were clickable.
+Decision: Render the room and its three activity objects with code-native SVG. The objects open their routes on click and move within room bounds on pointer drag or arrow keys. Feelings supports an SVG drawing overlay, and chess pointer drops use the existing chess.js legal moves and promotion flow.
+Rationale: Separate objects can move without leaving duplicate objects in a background image; pointer capture supports mouse, pen, and touch without native image dragging.
+Gotcha: Room positions and feelings drawings are local component state, reset on route changes, and are not yet connected to the session audit log. The room illustration is recreated rather than the original flattened artwork.
 
 ---
 

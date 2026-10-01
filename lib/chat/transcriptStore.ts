@@ -9,17 +9,16 @@
 // Server-only module: never import this from a "use client" component.
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { isValidSessionId, isTranscript } from "./validation";
 import type { Persona } from "./persona";
 import type { ChatTurn, Speaker, Transcript, TranscriptEntry } from "./types";
 
-const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
-
-export function isValidSessionId(id: unknown): id is string {
-  return typeof id === "string" && SESSION_ID_PATTERN.test(id);
-}
-
 function transcriptDir(): string {
-  return path.resolve(process.env.TRANSCRIPT_DIR || path.join(process.cwd(), "data", "transcripts"));
+  return path.resolve(
+    process.env.TRANSCRIPT_DIR ||
+      path.join(process.cwd(), "data", "transcripts"),
+  );
 }
 
 function fileFor(sessionId: string): string {
@@ -28,9 +27,16 @@ function fileFor(sessionId: string): string {
   return path.join(transcriptDir(), `${sessionId}.json`);
 }
 
-export async function readTranscript(sessionId: string): Promise<Transcript | null> {
+export async function readTranscript(
+  sessionId: string,
+): Promise<Transcript | null> {
   try {
-    return JSON.parse(await fs.readFile(fileFor(sessionId), "utf8")) as Transcript;
+    const data: unknown = JSON.parse(
+      await fs.readFile(fileFor(sessionId), "utf8"),
+    );
+    if (!isTranscript(data) || data.sessionId !== sessionId)
+      throw new Error("Invalid transcript data");
+    return data;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;
@@ -41,9 +47,16 @@ async function writeTranscript(t: Transcript): Promise<void> {
   const file = fileFor(t.sessionId);
   await fs.mkdir(path.dirname(file), { recursive: true });
   // Write-then-rename so a crash mid-write never leaves a half-written transcript.
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(t, null, 2), "utf8");
-  await fs.rename(tmp, file);
+  const tmp = `${file}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(tmp, JSON.stringify(t, null, 2), {
+      encoding: "utf8",
+      flag: "wx",
+    });
+    await fs.rename(tmp, file);
+  } finally {
+    await fs.rm(tmp, { force: true });
+  }
 }
 
 /**
@@ -51,7 +64,10 @@ async function writeTranscript(t: Transcript): Promise<void> {
  * scramble the order of entries (the transcript must be strictly ordered).
  */
 const locks = new Map<string, Promise<unknown>>();
-export function withSessionLock<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
+export function withSessionLock<T>(
+  sessionId: string,
+  work: () => Promise<T>,
+): Promise<T> {
   const previous = locks.get(sessionId) ?? Promise.resolve();
   const next = previous.catch(() => undefined).then(work);
   const settled = next.catch(() => undefined);
@@ -63,7 +79,10 @@ export function withSessionLock<T>(sessionId: string, work: () => Promise<T>): P
 }
 
 /** Returns the session's transcript, creating it (with the client's opening line) if new. */
-export async function getOrCreateTranscript(sessionId: string, persona: Persona): Promise<Transcript> {
+export async function getOrCreateTranscript(
+  sessionId: string,
+  persona: Persona,
+): Promise<Transcript> {
   const existing = await readTranscript(sessionId);
   if (existing) return existing;
   const now = new Date().toISOString();
@@ -75,8 +94,14 @@ export async function getOrCreateTranscript(sessionId: string, persona: Persona)
     updatedAt: now,
     entries: [],
   };
-  pushEntry(t, "system", `Session started with virtual client ${persona.name} (${persona.id}).`);
-  pushEntry(t, "virtual_client", persona.openingLine, { model: "scripted:opening-line" });
+  pushEntry(
+    t,
+    "system",
+    `Session started with virtual client ${persona.name} (${persona.id}).`,
+  );
+  pushEntry(t, "virtual_client", persona.openingLine, {
+    model: "scripted:opening-line",
+  });
   await writeTranscript(t);
   return t;
 }
@@ -128,13 +153,21 @@ export function toChatHistory(t: Transcript): ChatTurn[] {
     else turns.push({ role, content: e.text });
   }
   if (turns[0]?.role === "assistant") {
-    turns.unshift({ role: "user", content: "(The telehealth video session has just connected.)" });
+    turns.unshift({
+      role: "user",
+      content: "(The telehealth video session has just connected.)",
+    });
   }
   return turns;
 }
 
 export async function listTranscripts(): Promise<
-  Array<Pick<Transcript, "sessionId" | "personaName" | "createdAt" | "updatedAt"> & { entryCount: number }>
+  Array<
+    Pick<
+      Transcript,
+      "sessionId" | "personaName" | "createdAt" | "updatedAt"
+    > & { entryCount: number }
+  >
 > {
   let files: string[];
   try {
@@ -143,21 +176,34 @@ export async function listTranscripts(): Promise<
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
   }
-  const rows = await Promise.all(
-    files
-      .filter((f) => f.endsWith(".json"))
-      .map(async (f) => {
-        const t = await readTranscript(f.slice(0, -".json".length)).catch(() => null);
-        return t && {
-          sessionId: t.sessionId,
-          personaName: t.personaName,
-          createdAt: t.createdAt,
-          updatedAt: t.updatedAt,
-          entryCount: t.entries.length,
-        };
-      }),
+  const candidates = files.filter(
+    (file) => file.endsWith(".json") && isValidSessionId(file.slice(0, -5)),
   );
-  return rows.filter((r) => r !== null).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const rows: Array<
+    Pick<
+      Transcript,
+      "sessionId" | "personaName" | "createdAt" | "updatedAt"
+    > & { entryCount: number }
+  > = [];
+  // Bound file reads so a large archive cannot exhaust the process's file handles.
+  for (let offset = 0; offset < candidates.length; offset += 32) {
+    const batch = await Promise.all(
+      candidates
+        .slice(offset, offset + 32)
+        .map((file) => readTranscript(file.slice(0, -5))),
+    );
+    for (const transcript of batch) {
+      if (transcript)
+        rows.push({
+          sessionId: transcript.sessionId,
+          personaName: transcript.personaName,
+          createdAt: transcript.createdAt,
+          updatedAt: transcript.updatedAt,
+          entryCount: transcript.entries.length,
+        });
+    }
+  }
+  return rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
 const SPEAKER_LABEL: Record<Speaker, (t: Transcript) => string> = {
@@ -178,7 +224,8 @@ export function formatTranscriptText(t: Transcript): string {
     "".padEnd(60, "-"),
   ];
   const lines = t.entries.map(
-    (e) => `[${e.timestamp}] #${e.seq} ${SPEAKER_LABEL[e.speaker](t)}: ${e.text}`,
+    (e) =>
+      `[${e.timestamp}] #${e.seq} ${SPEAKER_LABEL[e.speaker](t)}: ${e.text}`,
   );
   return [...header, ...lines, ""].join("\n");
 }

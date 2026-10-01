@@ -17,25 +17,25 @@ export function SessionHeader() {
   const title = TITLES[pathname] ?? { label: "Welcome room" };
 
   return (
-    <header className="flex h-header shrink-0 items-center border-b border-charcoal/10 bg-cream px-6">
-      <div className="w-48 shrink-0 text-base font-semibold text-charcoal">
+    <header className="flex h-header shrink-0 items-center gap-3 border-b border-charcoal/10 bg-cream px-3 sm:px-6">
+      <div className="w-auto sm:w-48 shrink-0 text-base font-semibold text-charcoal">
         Practice Room
       </div>
-      <div className="flex flex-1 items-center justify-center">
+      <div className="flex min-w-0 flex-1 items-center justify-end sm:justify-center">
         {title.back ? (
           <Link
             href="/practice"
-            className="text-base font-medium text-charcoal hover:opacity-70"
+            className="truncate text-base font-medium text-charcoal hover:opacity-70"
           >
             ← {title.label}
           </Link>
         ) : (
-          <span className="text-base font-medium text-charcoal">
+          <span className="truncate text-base font-medium text-charcoal">
             {title.label}
           </span>
         )}
       </div>
-      <div className="w-48 shrink-0 text-right text-sm text-charcoal/50">
+      <div className="hidden sm:block sm:w-48 shrink-0 text-right text-sm text-charcoal/50">
         Simulation
       </div>
     </header>

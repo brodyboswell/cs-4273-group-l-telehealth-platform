@@ -11,7 +11,10 @@
  * at all it falls back to "mock" so the UI can be developed without spending tokens.
  */
 // Server-only module: never import this from a "use client" component.
+import { isRecord } from "./validation";
 import type { ChatTurn } from "./types";
+
+type ProviderEnvironment = Record<string, string | undefined>;
 
 export type ProviderName = "anthropic" | "openai" | "mock";
 
@@ -22,7 +25,10 @@ export interface LlmReply {
 }
 
 export class LlmError extends Error {
-  constructor(message: string, readonly status = 502) {
+  constructor(
+    message: string,
+    readonly status = 502,
+  ) {
     super(message);
     this.name = "LlmError";
   }
@@ -31,13 +37,22 @@ export class LlmError extends Error {
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_OUTPUT_TOKENS = 300;
 
-export function resolveProvider(env: NodeJS.ProcessEnv = process.env): ProviderName {
+export function resolveProvider(
+  env: ProviderEnvironment = process.env,
+): ProviderName {
   const explicit = env.LLM_PROVIDER?.trim().toLowerCase();
-  if (explicit === "anthropic" || explicit === "openai" || explicit === "mock") {
+  if (
+    explicit === "anthropic" ||
+    explicit === "openai" ||
+    explicit === "mock"
+  ) {
     return explicit;
   }
   if (explicit) {
-    throw new LlmError(`Unknown LLM_PROVIDER "${env.LLM_PROVIDER}". Use anthropic, openai, or mock.`, 500);
+    throw new LlmError(
+      `Unknown LLM_PROVIDER "${env.LLM_PROVIDER}". Use anthropic, openai, or mock.`,
+      500,
+    );
   }
   if (env.ANTHROPIC_API_KEY) return "anthropic";
   if (env.OPENAI_API_KEY) return "openai";
@@ -47,7 +62,7 @@ export function resolveProvider(env: NodeJS.ProcessEnv = process.env): ProviderN
 export async function generateClientReply(
   systemPrompt: string,
   history: ChatTurn[],
-  env: NodeJS.ProcessEnv = process.env,
+  env: ProviderEnvironment = process.env,
 ): Promise<LlmReply> {
   const provider = resolveProvider(env);
   switch (provider) {
@@ -62,12 +77,19 @@ export async function generateClientReply(
 
 function requireKey(value: string | undefined, name: string): string {
   if (!value) {
-    throw new LlmError(`${name} is not set. Add it to .env.local (see .env.example).`, 500);
+    throw new LlmError(
+      `${name} is not set. Add it to .env.local (see .env.example).`,
+      500,
+    );
   }
   return value;
 }
 
-async function postJson(url: string, headers: Record<string, string>, body: unknown) {
+async function postJson(
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+) {
   let res: Response;
   try {
     res = await fetch(url, {
@@ -77,40 +99,68 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
-    const reason = err instanceof Error && err.name === "TimeoutError" ? "timed out" : "could not be reached";
+    const reason =
+      err instanceof Error && err.name === "TimeoutError"
+        ? "timed out"
+        : "could not be reached";
     throw new LlmError(`The AI provider ${reason}.`, 504);
   }
-  const data = await res.json().catch(() => null);
+  const data: unknown = await res.json().catch(() => null);
   if (!res.ok) {
-    // Log the provider's message server-side only; it can mention the key or account.
-    console.error(`[chat] provider error ${res.status}:`, data?.error ?? data);
+    // Provider response bodies may contain account details; log only the status.
+    console.error(`[chat] provider error ${res.status}`);
     const hint =
-      res.status === 401 ? "the API key was rejected" :
-      res.status === 429 ? "the rate limit or quota was reached" :
-      `status ${res.status}`;
+      res.status === 401
+        ? "the API key was rejected"
+        : res.status === 429
+          ? "the rate limit or quota was reached"
+          : `status ${res.status}`;
     throw new LlmError(`The AI provider returned an error (${hint}).`, 502);
   }
+  if (!isRecord(data))
+    throw new LlmError("The AI provider returned an invalid reply.");
   return data;
 }
 
-async function callAnthropic(systemPrompt: string, history: ChatTurn[], env: NodeJS.ProcessEnv): Promise<LlmReply> {
+async function callAnthropic(
+  systemPrompt: string,
+  history: ChatTurn[],
+  env: ProviderEnvironment,
+): Promise<LlmReply> {
   const apiKey = requireKey(env.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY");
   const model = env.ANTHROPIC_MODEL || "claude-haiku-4-5";
   const data = await postJson(
     "https://api.anthropic.com/v1/messages",
     { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-    { model, max_tokens: MAX_OUTPUT_TOKENS, system: systemPrompt, messages: history },
+    {
+      model,
+      max_tokens: MAX_OUTPUT_TOKENS,
+      system: systemPrompt,
+      messages: history,
+    },
   );
-  const text = (data?.content ?? [])
-    .filter((block: { type: string }) => block.type === "text")
-    .map((block: { text: string }) => block.text)
+  const text = (Array.isArray(data.content) ? data.content : [])
+    .filter(
+      (block: unknown): block is { type: "text"; text: string } =>
+        isRecord(block) &&
+        block.type === "text" &&
+        typeof block.text === "string",
+    )
+    .map((block) => block.text)
     .join("")
     .trim();
   if (!text) throw new LlmError("The AI provider returned an empty reply.");
-  return { text, model: `anthropic:${data.model ?? model}` };
+  return {
+    text,
+    model: `anthropic:${typeof data.model === "string" ? data.model : model}`,
+  };
 }
 
-async function callOpenAI(systemPrompt: string, history: ChatTurn[], env: NodeJS.ProcessEnv): Promise<LlmReply> {
+async function callOpenAI(
+  systemPrompt: string,
+  history: ChatTurn[],
+  env: ProviderEnvironment,
+): Promise<LlmReply> {
   const apiKey = requireKey(env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const model = env.OPENAI_MODEL || "gpt-4o-mini";
   const data = await postJson(
@@ -122,9 +172,17 @@ async function callOpenAI(systemPrompt: string, history: ChatTurn[], env: NodeJS
       messages: [{ role: "system", content: systemPrompt }, ...history],
     },
   );
-  const text = String(data?.choices?.[0]?.message?.content ?? "").trim();
+  const choice: unknown = Array.isArray(data.choices) ? data.choices[0] : null;
+  const message: unknown = isRecord(choice) ? choice.message : null;
+  const text =
+    isRecord(message) && typeof message.content === "string"
+      ? message.content.trim()
+      : "";
   if (!text) throw new LlmError("The AI provider returned an empty reply.");
-  return { text, model: `openai:${data.model ?? model}` };
+  return {
+    text,
+    model: `openai:${typeof data.model === "string" ? data.model : model}`,
+  };
 }
 
 const MOCK_REPLIES = [
@@ -139,6 +197,7 @@ const MOCK_REPLIES = [
 function mockReply(history: ChatTurn[]): LlmReply {
   const learnerTurns = history.filter((t) => t.role === "user").length;
   // History starts with a synthetic "session connected" user turn, so skip it.
-  const text = MOCK_REPLIES[Math.max(0, learnerTurns - 2) % MOCK_REPLIES.length];
+  const text =
+    MOCK_REPLIES[Math.max(0, learnerTurns - 2) % MOCK_REPLIES.length];
   return { text, model: "mock:offline" };
 }
