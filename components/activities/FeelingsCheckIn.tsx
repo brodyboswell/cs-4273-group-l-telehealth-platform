@@ -1,87 +1,82 @@
 "use client";
 
 import { useState } from "react";
+import {
+  MOOD_OPTIONS,
+  parseMoodAgentAction,
+  type MoodAgentAction,
+  type MoodId,
+} from "@/lib/mood/moodTypes";
+import { requestMockAgentMood } from "@/lib/mood/mockAgent";
 import { Icon } from "@/components/ui/Icon";
 import { FeelingsDrawing } from "./FeelingsDrawing";
 
-const FEELINGS = [
+const FACE_DETAILS: Record<
+  MoodId,
   {
-    label: "Calm",
-    color: "#88A294",
+    eyes?: string;
+    brows?: string;
+    mouth: string;
+  }
+> = {
+  calm: {
     eyes: "M16 25 Q20 28 24 25 M32 25 Q36 28 40 25",
     mouth: "M21 35 Q28 39 35 35",
   },
-  {
-    label: "Happy",
-    color: "#E8C84A",
+  happy: {
     mouth: "M18 33 Q28 48 38 33 Z",
   },
-  {
-    label: "Excited",
-    color: "#E8A060",
+  excited: {
     eyes: "M16 24 Q20 15 24 24 M32 24 Q36 15 40 24",
-    mouth: "M19 31 Q28 50 37 31 Z",
     brows: "M16 15 L23 13 M33 13 L40 15",
+    mouth: "M19 31 Q28 50 37 31 Z",
   },
-  {
-    label: "Proud",
-    color: "#B07AC9",
+  proud: {
     eyes: "M16 24 Q20 19 24 24 M32 24 Q36 19 40 24",
-    mouth: "M20 34 Q28 43 38 32",
     brows: "M16 16 L23 16 M33 16 L40 16",
+    mouth: "M20 34 Q28 43 38 32",
   },
-  {
-    label: "Worried",
-    color: "#7BA3C9",
-    mouth: "M20 38 Q28 31 36 38",
+  worried: {
     brows: "M15 19 L24 15 M32 15 L41 19",
+    mouth: "M20 38 Q28 31 36 38",
   },
-  {
-    label: "Sad",
-    color: "#6B8FB8",
+  sad: {
     eyes: "M17 26 L23 27 M33 27 L39 26",
-    mouth: "M19 40 Q28 29 37 40",
     brows: "M16 19 L24 16 M32 16 L40 19",
+    mouth: "M19 40 Q28 29 37 40",
   },
-  {
-    label: "Angry",
-    color: "#D65A4A",
-    mouth: "M19 40 Q28 30 37 40",
+  angry: {
     brows: "M15 16 L24 21 M32 21 L41 16",
+    mouth: "M19 40 Q28 30 37 40",
   },
-  {
-    label: "Frustrated",
-    color: "#E89060",
+  frustrated: {
     eyes: "M16 23 L24 26 L16 28 M40 23 L32 26 L40 28",
-    mouth: "M19 37 L24 35 L29 38 L34 35 L38 37",
     brows: "M16 16 L23 19 M33 19 L40 16",
+    mouth: "M19 37 L24 35 L29 38 L34 35 L38 37",
   },
-  {
-    label: "Tired",
-    color: "#9B7AB8",
+  tired: {
     eyes: "M16 26 L24 26 M32 26 L40 26",
     mouth: "M24 35 C24 30 32 30 32 35 C32 43 24 43 24 35 Z",
   },
-  {
-    label: "Lonely",
-    color: "#88A294",
+  lonely: {
     eyes: "M18 28 L22 28 M34 28 L38 28",
-    mouth: "M23 39 Q28 34 33 39",
     brows: "M16 20 Q20 21 24 17 M32 17 Q36 21 40 20",
+    mouth: "M23 39 Q28 34 33 39",
   },
-  {
-    label: "Hopeful",
-    color: "#E8C84A",
-    mouth: "M21 35 Q28 43 35 35",
+  hopeful: {
     brows: "M16 16 Q20 12 24 16 M32 16 Q36 12 40 16",
+    mouth: "M21 35 Q28 43 35 35",
   },
-  {
-    label: "Unsure",
-    color: "#E8A060",
-    mouth: "M20 37 Q25 33 29 37 Q33 41 37 36",
+  unsure: {
     brows: "M16 17 L24 17 M32 16 Q37 11 41 16",
+    mouth: "M20 37 Q25 33 29 37 Q33 41 37 36",
   },
-] as const;
+};
+
+const FEELINGS = MOOD_OPTIONS.map((mood) => ({
+  ...mood,
+  ...FACE_DETAILS[mood.id],
+}));
 
 type Feeling = (typeof FEELINGS)[number];
 
@@ -142,7 +137,29 @@ function FeelingFace({ feeling }: { feeling: Feeling }) {
 
 export function FeelingsCheckIn() {
   const [drawing, setDrawing] = useState(false);
-  const [selected, setSelected] = useState<Feeling | null>(null);
+  const [selectedMoodId, setSelectedMoodId] = useState<MoodId | null>(null);
+  const [agentAction, setAgentAction] = useState<MoodAgentAction | null>(null);
+  const [isRequesting, setIsRequesting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const selectedMood = MOOD_OPTIONS.find((mood) => mood.id === selectedMoodId);
+
+  async function handleGetAgentMood() {
+    setIsRequesting(true);
+    setError(null);
+    try {
+      const action = parseMoodAgentAction(await requestMockAgentMood());
+      setSelectedMoodId(action.moodId);
+      setAgentAction(action);
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "AI Bot mood request failed",
+      );
+    } finally {
+      setIsRequesting(false);
+    }
+  }
 
   return (
     <div className="h-full overflow-y-auto bg-charcoal p-3 sm:p-6">
@@ -166,6 +183,42 @@ export function FeelingsCheckIn() {
             ? "Draw anywhere on the board to express how you feel."
             : "Select a feeling to talk about. All feelings are welcome."}
         </p>
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={handleGetAgentMood}
+            disabled={isRequesting}
+            className="rounded-panel bg-sage px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isRequesting ? "Getting mood…" : "TEMP Get Agent Mood"}
+          </button>
+          {isRequesting && (
+            <span className="text-sm text-charcoal/60" role="status">
+              AI Bot is choosing a mood…
+            </span>
+          )}
+        </div>
+        {error && (
+          <p
+            className="mt-4 rounded-panel border border-terracotta/30 bg-terracotta/10 px-4 py-3 text-sm text-charcoal"
+            role="alert"
+          >
+            {error}
+          </p>
+        )}
+        {agentAction && selectedMood && (
+          <div
+            className="mt-4 rounded-panel border border-sage/30 bg-sage/10 px-4 py-3"
+            aria-live="polite"
+          >
+            <p className="text-sm font-semibold text-charcoal">
+              AI Bot selected: {selectedMood.label}
+            </p>
+            <p className="mt-1 text-sm text-charcoal/70">
+              {agentAction.rationale}
+            </p>
+          </div>
+        )}
         <div className="relative mt-6 pb-16">
           <div
             className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4"
@@ -174,14 +227,19 @@ export function FeelingsCheckIn() {
             aria-describedby="feelings-instructions"
           >
             {FEELINGS.map((feeling) => {
-              const active = selected?.label === feeling.label;
+              const active = selectedMoodId === feeling.id;
               return (
                 <button
                   type="button"
-                  key={feeling.label}
-                  disabled={drawing}
+                  key={feeling.id}
+                  data-mood-id={feeling.id}
+                  disabled={drawing || isRequesting}
                   aria-pressed={active}
-                  onClick={() => setSelected(active ? null : feeling)}
+                  onClick={() => {
+                    setSelectedMoodId(active ? null : feeling.id);
+                    setAgentAction(null);
+                    setError(null);
+                  }}
                   className={`relative flex min-h-28 min-w-0 flex-col items-center justify-center gap-2 rounded-panel border-2 p-3 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-charcoal ${active ? "border-sage bg-sage/10" : "border-transparent hover:border-sage/50 hover:bg-cream"}`}
                 >
                   {active && (
@@ -201,12 +259,18 @@ export function FeelingsCheckIn() {
           <FeelingsDrawing enabled={drawing} />
         </div>
         <p className="sr-only" role="status" aria-live="polite">
-          {selected ? `Selected ${selected.label}` : "No feeling selected"}
+          {selectedMood
+            ? `Selected ${selectedMood.label}`
+            : "No feeling selected"}
         </p>
         <button
           type="button"
-          onClick={() => setSelected(null)}
-          disabled={!selected}
+          onClick={() => {
+            setSelectedMoodId(null);
+            setAgentAction(null);
+            setError(null);
+          }}
+          disabled={!selectedMoodId || isRequesting}
           className="mt-3 rounded-panel border border-charcoal/30 px-3 py-2 text-sm text-charcoal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-charcoal disabled:opacity-40"
         >
           Clear selection
