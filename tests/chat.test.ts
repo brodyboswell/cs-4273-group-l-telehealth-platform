@@ -6,7 +6,12 @@ import path from "node:path";
 import { POST } from "../app/api/chat/route";
 import { GET as getTranscript } from "../app/api/transcripts/[sessionId]/route";
 import { GET as getTranscripts } from "../app/api/transcripts/route";
-import { DEFAULT_PERSONA } from "../lib/chat/persona";
+import { COUNSELOR_PERSONA, DEFAULT_PERSONA } from "../lib/chat/persona";
+import {
+  detectSafetyConcern,
+  SAFETY_RESPONSE,
+  SAFETY_RESPONSE_MODEL,
+} from "../lib/chat/safety";
 import {
   generateClientReply,
   LlmError,
@@ -269,6 +274,39 @@ describe("provider responses", () => {
     );
   });
 
+  it("sends the Anthropic workspace header only when one is configured", async (context) => {
+    const sent: Array<Record<string, string>> = [];
+    context.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+      sent.push(init.headers as Record<string, string>);
+      return Response.json({ content: [{ type: "text", text: "hi" }] });
+    });
+    const env = { LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "test-key" };
+    await generateClientReply("scenario", [], env);
+    await generateClientReply("scenario", [], {
+      ...env,
+      ANTHROPIC_WORKSPACE_ID: " wrkspc_test ",
+    });
+    assert.equal(sent[0]["anthropic-workspace-id"], undefined);
+    assert.equal(sent[1]["anthropic-workspace-id"], "wrkspc_test");
+  });
+
+  it("explains a rejected request without exposing the provider body", async (context) => {
+    context.mock.method(console, "error", () => {});
+    context.mock.method(globalThis, "fetch", async () =>
+      Response.json({ error: { message: "secret detail" } }, { status: 400 }),
+    );
+    await assert.rejects(
+      generateClientReply("scenario", [], {
+        LLM_PROVIDER: "anthropic",
+        ANTHROPIC_API_KEY: "test-key",
+      }),
+      (error: unknown) =>
+        error instanceof LlmError &&
+        /ANTHROPIC_WORKSPACE_ID/.test(error.message) &&
+        !/secret detail/.test(error.message),
+    );
+  });
+
   it("rejects invalid provider JSON without leaking its response", async (context) => {
     context.mock.method(
       globalThis,
@@ -282,5 +320,125 @@ describe("provider responses", () => {
       }),
       /invalid reply/,
     );
+  });
+});
+
+describe("watch a model counselor mode", () => {
+  it("creates a counselor session only when the session is new", async () => {
+    const created = await getTranscript(
+      new Request("http://localhost/api/transcripts/counselor-a?mode=counselor"),
+      { params: Promise.resolve({ sessionId: "counselor-a" }) },
+    );
+    const transcript = await created.json();
+    assert.equal(transcript.personaId, COUNSELOR_PERSONA.id);
+    assert.equal(transcript.entries[1].speaker, "ai_counselor");
+    assert.match(transcript.entries[1].text, /not a doctor/);
+
+    // An existing Alex session keeps its persona even if a different mode is sent.
+    await post({ sessionId: "client-keeps", message: "Hi" });
+    const response = await post({
+      sessionId: "client-keeps",
+      message: "Hello again",
+      mode: "counselor",
+    });
+    const data = await response.json();
+    assert.equal(data.transcript.personaId, DEFAULT_PERSONA.id);
+    assert.equal(data.reply.speaker, "virtual_client");
+  });
+
+  it("rejects unknown modes", async () => {
+    assert.equal(
+      (await post({ sessionId: "bad-mode-1", message: "Hi", mode: "doctor" }))
+        .status,
+      400,
+    );
+    const response = await getTranscript(
+      new Request("http://localhost/api/transcripts/bad-mode-2?mode=doctor"),
+      { params: Promise.resolve({ sessionId: "bad-mode-2" }) },
+    );
+    assert.equal(response.status, 400);
+  });
+
+  it("replies as the counselor and labels both roles in the text transcript", async () => {
+    const response = await post({
+      sessionId: "counselor-b",
+      message: "School has been really stressful",
+      mode: "counselor",
+    });
+    const data = await response.json();
+    assert.equal(data.reply.speaker, "ai_counselor");
+    assert.ok(COUNSELOR_PERSONA.mockReplies.includes(data.reply.text));
+    assert.equal(data.safety, undefined);
+    const text = await (
+      await getTranscript(
+        new Request("http://localhost/api/transcripts/counselor-b?format=txt"),
+        { params: Promise.resolve({ sessionId: "counselor-b" }) },
+      )
+    ).text();
+    assert.match(text, /Mode: Watch a model counselor/);
+    assert.match(text, /Learner \(playing the client\): School has been/);
+    assert.match(text, /Sam \(AI practice counselor\):/);
+  });
+
+  it("answers self-harm or danger with the scripted safety response, never the LLM", async (context) => {
+    const fetchMock = context.mock.method(globalThis, "fetch", async () => {
+      throw new Error("the LLM must not be called");
+    });
+    const previous = process.env.LLM_PROVIDER;
+    process.env.LLM_PROVIDER = "anthropic";
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    try {
+      const response = await post({
+        sessionId: "counselor-c",
+        message: "honestly sometimes I want to hurt myself",
+        mode: "counselor",
+      });
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.equal(data.safety, true);
+      assert.equal(data.reply.text, SAFETY_RESPONSE);
+      assert.equal(data.reply.model, SAFETY_RESPONSE_MODEL);
+      assert.match(data.reply.text, /988/);
+      assert.ok(
+        data.transcript.entries.some(
+          (e: { speaker: string; text: string }) =>
+            e.speaker === "system" && /Safety response shown/.test(e.text),
+        ),
+      );
+      assert.equal(fetchMock.mock.callCount(), 0);
+    } finally {
+      process.env.LLM_PROVIDER = previous;
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
+
+  it("does not trigger the safety response in Alex mode, where the learner is the counselor", async () => {
+    const response = await post({
+      sessionId: "client-safety-q",
+      message: "Have you had any thoughts of suicide or wanting to hurt yourself?",
+    });
+    const data = await response.json();
+    assert.equal(data.safety, undefined);
+    assert.equal(data.reply.model, "mock:offline");
+  });
+
+  it("detects common self-harm and danger phrasing without flagging everyday stress", () => {
+    for (const text of [
+      "I've been thinking about suicide",
+      "i want to die",
+      "I keep cutting myself",
+      "my stepdad hits me",
+      "I don't feel safe at home",
+      "someone is abusing me",
+      "sometimes i feel like disappearing so nobody has to deal with me",
+    ])
+      assert.equal(detectSafetyConcern(text), true, text);
+    for (const text of [
+      "School is killing me with homework",
+      "I'm stressed about my exam",
+      "Some kids at school make fun of me",
+      "I can't sleep",
+    ])
+      assert.equal(detectSafetyConcern(text), false, text);
   });
 });

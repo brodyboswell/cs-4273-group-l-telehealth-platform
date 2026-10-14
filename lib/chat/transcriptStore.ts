@@ -9,16 +9,18 @@
 // Server-only module: never import this from a "use client" component.
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { isValidSessionId, isTranscript } from "./validation";
-import type { Persona } from "./persona";
+import { personaById, type Persona } from "./persona";
 import type { ChatTurn, Speaker, Transcript, TranscriptEntry } from "./types";
 
 function transcriptDir(): string {
-  return path.resolve(
-    process.env.TRANSCRIPT_DIR ||
-      path.join(process.cwd(), "data", "transcripts"),
-  );
+  if (process.env.TRANSCRIPT_DIR) return path.resolve(process.env.TRANSCRIPT_DIR);
+  // Vercel's project directory is read-only; /tmp is writable but temporary, so
+  // transcripts there survive only for demos until a database replaces this module.
+  if (process.env.VERCEL) return path.join(tmpdir(), "transcripts");
+  return path.join(process.cwd(), "data", "transcripts");
 }
 
 function fileFor(sessionId: string): string {
@@ -97,9 +99,9 @@ export async function getOrCreateTranscript(
   pushEntry(
     t,
     "system",
-    `Session started with virtual client ${persona.name} (${persona.id}).`,
+    `Session started with ${persona.aiRoleLabel} ${persona.name} (${persona.id}).`,
   );
-  pushEntry(t, "virtual_client", persona.openingLine, {
+  pushEntry(t, persona.aiSpeaker, persona.openingLine, {
     model: "scripted:opening-line",
   });
   await writeTranscript(t);
@@ -206,18 +208,23 @@ export async function listTranscripts(): Promise<
   return rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-const SPEAKER_LABEL: Record<Speaker, (t: Transcript) => string> = {
-  learner: () => "Learner",
-  virtual_client: (t) => `${t.personaName} (virtual client)`,
-  system: () => "System",
-};
+function speakerLabel(t: Transcript, speaker: Speaker): string {
+  const persona = personaById(t.personaId);
+  if (speaker === "learner") return persona.learnerRoleLabel;
+  if (speaker === "system") return "System";
+  return `${t.personaName} (${persona.aiRoleLabel})`;
+}
 
 /** Human-readable plain-text transcript, e.g. for instructors or qualitative coding. */
 export function formatTranscriptText(t: Transcript): string {
+  const persona = personaById(t.personaId);
   const header = [
     `Telehealth practice session transcript`,
     `Session ID: ${t.sessionId}`,
-    `Virtual client: ${t.personaName} (${t.personaId})`,
+    persona.mode === "counselor"
+      ? `Mode: Watch a model counselor (learner plays the client)`
+      : `Mode: Practice as counselor (AI plays the client)`,
+    `AI role: ${t.personaName}, ${persona.aiRoleLabel} (${t.personaId})`,
     `Started: ${t.createdAt}`,
     `Last updated: ${t.updatedAt}`,
     `Entries: ${t.entries.length}`,
@@ -225,7 +232,7 @@ export function formatTranscriptText(t: Transcript): string {
   ];
   const lines = t.entries.map(
     (e) =>
-      `[${e.timestamp}] #${e.seq} ${SPEAKER_LABEL[e.speaker](t)}: ${e.text}`,
+      `[${e.timestamp}] #${e.seq} ${speakerLabel(t, e.speaker)}: ${e.text}`,
   );
   return [...header, ...lines, ""].join("\n");
 }

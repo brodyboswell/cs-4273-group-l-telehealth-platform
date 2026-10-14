@@ -4,10 +4,18 @@
  * Vocabulary (matches AGENTS.md):
  * - "learner"        = the social-work student typing in the chat (the human).
  * - "virtual_client" = the simulated patient ("Alex") whose replies come from the LLM.
+ * - "ai_counselor"   = the AI practice counselor in "Watch a model counselor" mode,
+ *                      where the learner plays the client instead.
  * - "system"         = events the platform records itself (session start, errors).
  */
 
-export type Speaker = "learner" | "virtual_client" | "system";
+export type Speaker = "learner" | "virtual_client" | "ai_counselor" | "system";
+
+/**
+ * "client":    the learner practices as the counselor; the AI plays the client.
+ * "counselor": the learner plays a client; the AI models a counselor's interview.
+ */
+export type ChatMode = "client" | "counselor";
 
 export interface TranscriptEntry {
   /** 1-based position in the session; guarantees a stable order for replay and grading. */
@@ -41,6 +49,8 @@ export interface ChatTurn {
 export interface ChatRequestBody {
   sessionId: string;
   message: string;
+  /** Used only when this message creates the session; an existing session keeps its mode. */
+  mode?: ChatMode;
 }
 
 /** Successful response of POST /api/chat */
@@ -48,4 +58,6 @@ export interface ChatResponseBody {
   reply: TranscriptEntry;
   learnerEntry: TranscriptEntry;
   transcript: Transcript;
+  /** True when the reply is the scripted safety response with crisis resources. */
+  safety?: boolean;
 }

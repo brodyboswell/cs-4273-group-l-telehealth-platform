@@ -114,6 +114,21 @@ public/                      # Static images and avatars
 
 ---
 
+**2026-10-14 — "Watch a model counselor" chat mode with a scripted safety response**
+Context: The team wanted the AI to also model a counselor's interview (asking about school stress, bullying, sleep, mood, home) while the learner plays the client.
+Decision: Add a second persona (`sam-model-counselor-v1`) selected by a mode toggle on the chat screen; the mode is fixed when a session is created and stored via `personaId`, and AI entries use the `ai_counselor` speaker. In counselor mode, learner messages matching self-harm/abuse/danger keywords (`lib/chat/safety.ts`) get a fixed crisis-resources reply instead of an LLM call, with a `system` audit entry and a UI banner; the prompt also instructs the LLM to give the same message for indirect mentions.
+Rationale: The person typing could disclose a real crisis, so the response to it must not depend on the LLM. Keeping personas as data preserves one chat pipeline and transcript format for both modes.
+Gotcha: Keyword matching is a safety net, not a risk assessment, and the counselor is not a clinician. Real-participant use (especially minors) needs faculty/IRB review, human escalation, authentication and non-third-party data handling first. Safety matching runs only in counselor mode so learners can ask Alex screening questions.
+
+---
+
+**2026-10-14 — Anthropic workspace header and Vercel transcript folder**
+Context: An organization-level Anthropic key was rejected with 400 "not scoped to a workspace", and the Vercel preview could not write transcripts because the deployment directory is read-only.
+Decision: Send `anthropic-workspace-id` when `ANTHROPIC_WORKSPACE_ID` is set, and give 400 errors a hint naming it. When `VERCEL` is set and `TRANSCRIPT_DIR` is not, store transcripts in the OS temp folder.
+Gotcha: Vercel's `/tmp` is wiped between server instances, so hosted transcripts are for demos only until a database-backed store replaces `lib/chat/transcriptStore.ts`.
+
+---
+
 **2026-10-06 — Randomize mock chess moves**
 Context: The initial move mock always selected the first legal option, so games repeated the same simplistic move pattern.
 Decision: Select uniformly at random from the current legal move list; continue validating the choice against chess.js before applying it.

@@ -2,18 +2,45 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  isChatMode,
   isRecord,
   isTranscript,
   isValidSessionId,
   MAX_MESSAGE_LENGTH,
 } from "@/lib/chat/validation";
+import { personaById, personaForMode, type Persona } from "@/lib/chat/persona";
+import { CRISIS_RESOURCES, SAFETY_RESPONSE_MODEL } from "@/lib/chat/safety";
 import type {
+  ChatMode,
   ChatRequestBody,
   Transcript,
   TranscriptEntry,
 } from "@/lib/chat/types";
 
 const SESSION_STORAGE_KEY = "telehealth.practiceSessionId";
+const MODE_STORAGE_KEY = "telehealth.chatMode";
+
+const MODE_OPTIONS: Array<{ mode: ChatMode; label: string }> = [
+  { mode: "client", label: "Practice as counselor" },
+  { mode: "counselor", label: "Watch a model counselor" },
+];
+
+function loadMode(): ChatMode {
+  try {
+    const saved = window.sessionStorage.getItem(MODE_STORAGE_KEY);
+    return isChatMode(saved) ? saved : "client";
+  } catch {
+    return "client";
+  }
+}
+
+function saveMode(mode: ChatMode) {
+  try {
+    window.sessionStorage.setItem(MODE_STORAGE_KEY, mode);
+  } catch {
+    // Storage can be blocked; the chosen mode still applies to this page view.
+  }
+}
 
 function newSessionId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto)
@@ -52,7 +79,7 @@ function formatTime(iso: string) {
 export function ChatPanel() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
-  const [clientName, setClientName] = useState("Alex");
+  const [persona, setPersona] = useState<Persona>(() => personaForMode("client"));
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -64,7 +91,7 @@ export function ChatPanel() {
   const sendInFlight = useRef(false);
 
   const loadTranscript = useCallback(
-    async (id: string): Promise<Transcript | null> => {
+    async (id: string, mode?: ChatMode): Promise<Transcript | null> => {
       transcriptRequest.current?.abort();
       const controller = new AbortController();
       transcriptRequest.current = controller;
@@ -72,7 +99,9 @@ export function ChatPanel() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/transcripts/${encodeURIComponent(id)}`, {
+        // The mode only matters if this request creates the session.
+        const query = mode ? `?mode=${mode}` : "";
+        const res = await fetch(`/api/transcripts/${encodeURIComponent(id)}${query}`, {
           cache: "no-store",
           signal: controller.signal,
         });
@@ -87,7 +116,9 @@ export function ChatPanel() {
           throw new Error("The session returned an invalid transcript.");
         if (controller.signal.aborted) return null;
         setEntries(data.entries);
-        setClientName(data.personaName);
+        const loaded = personaById(data.personaId);
+        setPersona(loaded);
+        saveMode(loaded.mode);
         return data;
       } catch (err) {
         if (!controller.signal.aborted)
@@ -104,8 +135,10 @@ export function ChatPanel() {
 
   useEffect(() => {
     const id = loadSessionId();
+    const mode = loadMode();
+    setPersona(personaForMode(mode));
     setSessionId(id);
-    void loadTranscript(id);
+    void loadTranscript(id, mode);
     return () => {
       activeSession.current = null;
       transcriptRequest.current?.abort();
@@ -143,6 +176,7 @@ export function ChatPanel() {
         body: JSON.stringify({
           sessionId,
           message: text,
+          mode: persona.mode,
         } satisfies ChatRequestBody),
       });
       const data: unknown = await res.json().catch(() => null);
@@ -154,7 +188,7 @@ export function ChatPanel() {
           setError(
             isRecord(data) && typeof data.error === "string"
               ? data.error
-              : "The virtual client could not respond. Try again.",
+              : `${persona.name} could not respond. Try again.`,
           );
         return;
       }
@@ -191,14 +225,26 @@ export function ChatPanel() {
     }
   }
 
-  function startNewSession() {
+  function startNewSession(mode: ChatMode = persona.mode) {
     const id = newSessionId();
     saveSessionId(id);
+    saveMode(mode);
+    setPersona(personaForMode(mode));
     setSessionId(id);
     setEntries([]);
-    void loadTranscript(id);
+    setDraft("");
+    void loadTranscript(id, mode);
   }
 
+  const clientName = persona.name;
+  const counselorMode = persona.mode === "counselor";
+  // The counselor prompt also tells the LLM to give crisis resources, so show the
+  // banner for those replies too, not only for the scripted keyword response.
+  const safetyShown = entries.some(
+    (e) =>
+      e.model === SAFETY_RESPONSE_MODEL ||
+      (e.speaker === "ai_counselor" && e.text.includes("988")),
+  );
   const visible = entries.filter((e) => e.speaker !== "system");
   const transcriptUrl = sessionId
     ? `/api/transcripts/${encodeURIComponent(sessionId)}`
@@ -208,14 +254,47 @@ export function ChatPanel() {
     <div className="flex h-full flex-col bg-cream">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-charcoal/10 bg-white px-6 py-3">
         <div className="min-w-0">
+          <div
+            role="radiogroup"
+            aria-label="Chat mode"
+            className="mb-2 inline-flex rounded-panel border border-charcoal/20 p-0.5 text-xs"
+          >
+            {MODE_OPTIONS.map((option) => {
+              const active = option.mode === persona.mode;
+              return (
+                <button
+                  key={option.mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  disabled={sending || (loading && !active)}
+                  onClick={() => {
+                    // Switching mode starts a fresh session; the old transcript stays saved.
+                    if (!active) startNewSession(option.mode);
+                  }}
+                  className={`rounded-[6px] px-3 py-1 font-medium transition-colors disabled:opacity-50 ${
+                    active
+                      ? "bg-charcoal text-white"
+                      : "text-charcoal/70 hover:bg-cream"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
           <p className="text-sm font-semibold text-charcoal">
-            Session with {clientName}
+            {counselorMode
+              ? `You play the client · ${clientName} is an AI practice counselor`
+              : `Session with ${clientName}`}
           </p>
           <p
             className="truncate text-xs text-charcoal/50"
             title={sessionId ?? undefined}
           >
-            Every message is recorded in the session transcript
+            {counselorMode
+              ? "Practice only, not a doctor. Use made-up details. Every message is recorded."
+              : "Every message is recorded in the session transcript"}
           </p>
         </div>
         <div className="flex items-center gap-2 text-sm">
@@ -233,7 +312,7 @@ export function ChatPanel() {
           </a>
           <button
             type="button"
-            onClick={startNewSession}
+            onClick={() => startNewSession()}
             disabled={sending}
             className="rounded-panel px-3 py-1.5 text-charcoal/70 hover:bg-cream disabled:opacity-40"
           >
@@ -248,6 +327,21 @@ export function ChatPanel() {
         aria-live="polite"
       >
         <div className="mx-auto flex max-w-2xl flex-col gap-3">
+          {safetyShown && (
+            <div
+              role="note"
+              className="rounded-panel border border-terracotta/40 bg-terracotta/10 px-4 py-3 text-sm text-charcoal"
+            >
+              <p className="font-semibold">
+                If you or someone you know needs help right now:
+              </p>
+              <ul className="mt-1 list-disc pl-5">
+                {CRISIS_RESOURCES.map((resource) => (
+                  <li key={resource}>{resource}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {loading && visible.length === 0 && (
             <p className="text-center text-sm text-charcoal/50">
               Connecting to the session…
@@ -270,7 +364,8 @@ export function ChatPanel() {
                   {e.text}
                 </div>
                 <span className="mt-1 px-1 text-[11px] text-charcoal/45">
-                  {mine ? "You" : clientName} · {formatTime(e.timestamp)}
+                  {mine ? (counselorMode ? "You (as client)" : "You") : clientName}{" "}
+                  · {formatTime(e.timestamp)}
                 </span>
               </div>
             );
@@ -318,7 +413,11 @@ export function ChatPanel() {
               }}
               rows={2}
               maxLength={MAX_MESSAGE_LENGTH}
-              placeholder={`Message ${clientName}…`}
+              placeholder={
+                counselorMode
+                  ? `Answer ${clientName} as your practice client…`
+                  : `Message ${clientName}…`
+              }
               aria-label={`Message ${clientName}`}
               disabled={!sessionId || loading}
               className="min-h-[44px] flex-1 resize-none rounded-panel border border-charcoal/20 px-3 py-2 text-sm text-charcoal outline-none focus:border-sage focus:ring-1 focus:ring-sage disabled:bg-cream"

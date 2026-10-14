@@ -63,6 +63,7 @@ export async function generateClientReply(
   systemPrompt: string,
   history: ChatTurn[],
   env: ProviderEnvironment = process.env,
+  mockReplies: string[] = MOCK_REPLIES,
 ): Promise<LlmReply> {
   const provider = resolveProvider(env);
   switch (provider) {
@@ -71,7 +72,7 @@ export async function generateClientReply(
     case "openai":
       return callOpenAI(systemPrompt, history, env);
     case "mock":
-      return mockReply(history);
+      return mockReply(history, mockReplies);
   }
 }
 
@@ -112,7 +113,9 @@ async function postJson(
     const hint =
       res.status === 401
         ? "the API key was rejected"
-        : res.status === 429
+        : res.status === 400
+          ? "the request was rejected; check the model name, and set ANTHROPIC_WORKSPACE_ID if your key is not scoped to a workspace"
+          : res.status === 429
           ? "the rate limit or quota was reached"
           : `status ${res.status}`;
     throw new LlmError(`The AI provider returned an error (${hint}).`, 502);
@@ -129,9 +132,17 @@ async function callAnthropic(
 ): Promise<LlmReply> {
   const apiKey = requireKey(env.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY");
   const model = env.ANTHROPIC_MODEL || "claude-haiku-4-5";
+  const headers: Record<string, string> = {
+    "x-api-key": apiKey,
+    "anthropic-version": "2023-06-01",
+  };
+  // Organization-level keys are not tied to a workspace, so Anthropic requires
+  // the request to name one; workspace-scoped keys do not need this.
+  const workspaceId = env.ANTHROPIC_WORKSPACE_ID?.trim();
+  if (workspaceId) headers["anthropic-workspace-id"] = workspaceId;
   const data = await postJson(
     "https://api.anthropic.com/v1/messages",
-    { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    headers,
     {
       model,
       max_tokens: MAX_OUTPUT_TOKENS,
@@ -194,10 +205,10 @@ const MOCK_REPLIES = [
 ];
 
 /** Deterministic offline replies so the chat can be demoed without an API key. */
-function mockReply(history: ChatTurn[]): LlmReply {
+function mockReply(history: ChatTurn[], replies: string[]): LlmReply {
+  const pool = replies.length ? replies : MOCK_REPLIES;
   const learnerTurns = history.filter((t) => t.role === "user").length;
   // History starts with a synthetic "session connected" user turn, so skip it.
-  const text =
-    MOCK_REPLIES[Math.max(0, learnerTurns - 2) % MOCK_REPLIES.length];
+  const text = pool[Math.max(0, learnerTurns - 2) % pool.length];
   return { text, model: "mock:offline" };
 }

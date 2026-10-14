@@ -2,14 +2,15 @@
  * GET /api/transcripts/:sessionId            -> transcript as JSON
  * GET /api/transcripts/:sessionId?format=txt -> readable plain-text transcript
  * Add &download=1 to either to get a file download.
+ * Add ?mode=counselor when creating a session for "Watch a model counselor".
  *
  * A session that has no messages yet is created on first GET so the chat UI can
  * show the virtual client's opening line immediately.
  */
 import { jsonError } from "@/lib/chat/http";
-import { isValidSessionId } from "@/lib/chat/validation";
+import { isChatMode, isValidSessionId } from "@/lib/chat/validation";
 import type { Transcript } from "@/lib/chat/types";
-import { DEFAULT_PERSONA } from "@/lib/chat/persona";
+import { personaForMode } from "@/lib/chat/persona";
 import {
   formatTranscriptText,
   getOrCreateTranscript,
@@ -28,17 +29,23 @@ export async function GET(
     return jsonError(400, "Invalid session id.");
   }
 
+  const url = new URL(request.url);
+  const modeParam = url.searchParams.get("mode");
+  if (modeParam !== null && !isChatMode(modeParam)) {
+    return jsonError(400, 'mode must be "client" or "counselor".');
+  }
+
   let transcript: Transcript;
   try {
+    // The mode only applies when this request creates the session.
     transcript = await withSessionLock(sessionId, () =>
-      getOrCreateTranscript(sessionId, DEFAULT_PERSONA),
+      getOrCreateTranscript(sessionId, personaForMode(modeParam ?? undefined)),
     );
   } catch (error) {
     console.error("[transcripts] could not load session:", error);
     return jsonError(500, "Could not load the transcript.");
   }
 
-  const url = new URL(request.url);
   const asText = url.searchParams.get("format") === "txt";
   const download = url.searchParams.get("download") === "1";
   const headers: Record<string, string> = { "cache-control": "no-store" };
