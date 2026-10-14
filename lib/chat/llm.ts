@@ -63,6 +63,7 @@ export async function generateClientReply(
   systemPrompt: string,
   history: ChatTurn[],
   env: ProviderEnvironment = process.env,
+  mockReplies: string[] = MOCK_REPLIES,
 ): Promise<LlmReply> {
   const provider = resolveProvider(env);
   switch (provider) {
@@ -71,7 +72,7 @@ export async function generateClientReply(
     case "openai":
       return callOpenAI(systemPrompt, history, env);
     case "mock":
-      return mockReply(history);
+      return mockReply(history, mockReplies);
   }
 }
 
@@ -204,10 +205,10 @@ const MOCK_REPLIES = [
 ];
 
 /** Deterministic offline replies so the chat can be demoed without an API key. */
-function mockReply(history: ChatTurn[]): LlmReply {
+function mockReply(history: ChatTurn[], replies: string[]): LlmReply {
+  const pool = replies.length ? replies : MOCK_REPLIES;
   const learnerTurns = history.filter((t) => t.role === "user").length;
   // History starts with a synthetic "session connected" user turn, so skip it.
-  const text =
-    MOCK_REPLIES[Math.max(0, learnerTurns - 2) % MOCK_REPLIES.length];
+  const text = pool[Math.max(0, learnerTurns - 2) % pool.length];
   return { text, model: "mock:offline" };
 }

@@ -1,4 +1,4 @@
-import type { Transcript } from "./types";
+import type { ChatMode, Transcript } from "./types";
 
 /** Shared browser/server input rules; keep this module free of server imports. */
 export const MAX_MESSAGE_LENGTH = 2000;
@@ -6,6 +6,10 @@ const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 
 export function isValidSessionId(id: unknown): id is string {
   return typeof id === "string" && SESSION_ID_PATTERN.test(id);
+}
+
+export function isChatMode(value: unknown): value is ChatMode {
+  return value === "client" || value === "counselor";
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -34,6 +38,7 @@ export function isTranscript(value: unknown): value is Transcript {
       entry.seq === index + 1 &&
       (entry.speaker === "learner" ||
         entry.speaker === "virtual_client" ||
+        entry.speaker === "ai_counselor" ||
         entry.speaker === "system") &&
       typeof entry.text === "string" &&
       isTimestamp(entry.timestamp) &&

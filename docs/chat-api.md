@@ -17,6 +17,30 @@ Force a provider with `LLM_PROVIDER=anthropic|openai|mock`.
 
 The key is only read inside the API route on the server. The browser never sees it.
 
+## Two modes
+
+The chat screen has a toggle at the top. Switching mode starts a new session; the old transcript stays saved.
+
+| Mode | Who the AI plays | Who you play | Persona |
+|---|---|---|---|
+| **Practice as counselor** (default) | Alex, a guarded 19-year-old client | The counselor | `alex-rapport-v1` |
+| **Watch a model counselor** | Sam, an AI practice counselor | A made-up client (e.g. a stressed or bullied student) | `sam-model-counselor-v1` |
+
+Sam introduces himself as an AI practice counselor (never a doctor), asks one open question at a time,
+reflects back what he heard first, explores school stress, friends and bullying, sleep, mood and home,
+and never diagnoses or discusses medication.
+
+**Safety in counselor mode:** if the client's message mentions self-harm, suicide, abuse or not being
+safe (`lib/chat/safety.ts`), the server skips the AI and answers with a fixed message listing crisis
+resources (988 call/text, Crisis Text Line 741741, 911, a trusted adult). A `system` entry records that it
+happened, and the chat shows a crisis-resources banner. Sam's instructions also tell the AI to give the same
+message for indirect mentions the keyword list misses. This is a safety net, not a risk assessment, and
+the mode is for practice with made-up details only.
+
+The transcript records which mode a session used: `speaker` is `virtual_client` for Alex and
+`ai_counselor` for Sam, and the text transcript labels the human as "Learner" or
+"Learner (playing the client)".
+
 ## How it fits together
 
 ```
@@ -35,8 +59,8 @@ That makes the transcript the single source of truth for grading and research.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/chat` | Body `{ "sessionId": "...", "message": "..." }` → Alex's reply plus the full transcript |
-| GET | `/api/transcripts/:sessionId` | Transcript as JSON (creates the session and its opening line if it's new) |
+| POST | `/api/chat` | Body `{ "sessionId": "...", "message": "...", "mode": "client" or "counselor" }` → the AI's reply plus the full transcript. `mode` only applies to a new session; `"safety": true` marks the scripted crisis response |
+| GET | `/api/transcripts/:sessionId` | Transcript as JSON (creates the session and its opening line if it's new; add `?mode=counselor` to create a counselor session) |
 | GET | `/api/transcripts/:sessionId?format=txt` | Readable text transcript; add `&download=1` to download |
 | GET | `/api/transcripts` | List of all recorded sessions (newest first) |
 

@@ -1,6 +1,10 @@
 /**
  * POST /api/chat
- * Body: { sessionId: string, message: string }
+ * Body: { sessionId: string, message: string, mode?: "client" | "counselor" }
+ *
+ * `mode` only matters when the message creates a new session; an existing session
+ * keeps the persona it started with. In counselor mode, messages that mention
+ * self-harm or danger get a fixed safety response instead of an LLM reply.
  *
  * Records the learner's message, asks the LLM (as the virtual client) for a reply,
  * records the reply, and returns both entries plus the full transcript.
@@ -8,7 +12,12 @@
  * browser, so the log is the single source of truth for what was said.
  */
 import { generateClientReply, LlmError } from "@/lib/chat/llm";
-import { DEFAULT_PERSONA } from "@/lib/chat/persona";
+import { personaById, personaForMode } from "@/lib/chat/persona";
+import {
+  detectSafetyConcern,
+  SAFETY_RESPONSE,
+  SAFETY_RESPONSE_MODEL,
+} from "@/lib/chat/safety";
 import {
   appendEntry,
   getOrCreateTranscript,
@@ -17,6 +26,7 @@ import {
 } from "@/lib/chat/transcriptStore";
 import { jsonError } from "@/lib/chat/http";
 import {
+  isChatMode,
   isRecord,
   isValidSessionId,
   MAX_MESSAGE_LENGTH,
@@ -36,7 +46,10 @@ export async function POST(request: Request) {
 
   if (!isRecord(body))
     return jsonError(400, "Request body must be a JSON object.");
-  const { sessionId, message } = body;
+  const { sessionId, message, mode } = body;
+  if (mode !== undefined && !isChatMode(mode)) {
+    return jsonError(400, 'mode must be "client" or "counselor".');
+  }
   if (!isValidSessionId(sessionId)) {
     return jsonError(
       400,
@@ -58,19 +71,41 @@ export async function POST(request: Request) {
     const result = await withSessionLock(sessionId, async () => {
       const transcript = await getOrCreateTranscript(
         sessionId,
-        DEFAULT_PERSONA,
+        personaForMode(mode),
       );
+      const persona = personaById(transcript.personaId);
       const learnerEntry = await appendEntry(transcript, "learner", text);
+
+      if (persona.mode === "counselor" && detectSafetyConcern(text)) {
+        // Never leave a possible real crisis to the LLM; answer with reviewed text.
+        await appendEntry(
+          transcript,
+          "system",
+          "Safety response shown: the learner's message matched a self-harm or danger keyword.",
+        );
+        const replyEntry = await appendEntry(
+          transcript,
+          persona.aiSpeaker,
+          SAFETY_RESPONSE,
+          { model: SAFETY_RESPONSE_MODEL },
+        );
+        return {
+          ok: true as const,
+          body: { reply: replyEntry, learnerEntry, transcript, safety: true },
+        };
+      }
 
       const started = performance.now();
       try {
         const reply = await generateClientReply(
-          DEFAULT_PERSONA.systemPrompt,
+          persona.systemPrompt,
           toChatHistory(transcript),
+          process.env,
+          persona.mockReplies,
         );
         const replyEntry = await appendEntry(
           transcript,
-          "virtual_client",
+          persona.aiSpeaker,
           reply.text,
           {
             model: reply.model,
@@ -90,7 +125,7 @@ export async function POST(request: Request) {
         await appendEntry(
           transcript,
           "system",
-          `Virtual client failed to respond: ${msg}`,
+          `${persona.name} (${persona.aiRoleLabel}) failed to respond: ${msg}`,
         );
         if (!(err instanceof LlmError))
           console.error("[chat] unexpected error:", err);
