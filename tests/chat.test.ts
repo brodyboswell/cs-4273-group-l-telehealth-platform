@@ -269,6 +269,39 @@ describe("provider responses", () => {
     );
   });
 
+  it("sends the Anthropic workspace header only when one is configured", async (context) => {
+    const sent: Array<Record<string, string>> = [];
+    context.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+      sent.push(init.headers as Record<string, string>);
+      return Response.json({ content: [{ type: "text", text: "hi" }] });
+    });
+    const env = { LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "test-key" };
+    await generateClientReply("scenario", [], env);
+    await generateClientReply("scenario", [], {
+      ...env,
+      ANTHROPIC_WORKSPACE_ID: " wrkspc_test ",
+    });
+    assert.equal(sent[0]["anthropic-workspace-id"], undefined);
+    assert.equal(sent[1]["anthropic-workspace-id"], "wrkspc_test");
+  });
+
+  it("explains a rejected request without exposing the provider body", async (context) => {
+    context.mock.method(console, "error", () => {});
+    context.mock.method(globalThis, "fetch", async () =>
+      Response.json({ error: { message: "secret detail" } }, { status: 400 }),
+    );
+    await assert.rejects(
+      generateClientReply("scenario", [], {
+        LLM_PROVIDER: "anthropic",
+        ANTHROPIC_API_KEY: "test-key",
+      }),
+      (error: unknown) =>
+        error instanceof LlmError &&
+        /ANTHROPIC_WORKSPACE_ID/.test(error.message) &&
+        !/secret detail/.test(error.message),
+    );
+  });
+
   it("rejects invalid provider JSON without leaking its response", async (context) => {
     context.mock.method(
       globalThis,

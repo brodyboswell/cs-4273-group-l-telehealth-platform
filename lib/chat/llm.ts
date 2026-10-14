@@ -112,7 +112,9 @@ async function postJson(
     const hint =
       res.status === 401
         ? "the API key was rejected"
-        : res.status === 429
+        : res.status === 400
+          ? "the request was rejected; check the model name, and set ANTHROPIC_WORKSPACE_ID if your key is not scoped to a workspace"
+          : res.status === 429
           ? "the rate limit or quota was reached"
           : `status ${res.status}`;
     throw new LlmError(`The AI provider returned an error (${hint}).`, 502);
@@ -129,9 +131,17 @@ async function callAnthropic(
 ): Promise<LlmReply> {
   const apiKey = requireKey(env.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY");
   const model = env.ANTHROPIC_MODEL || "claude-haiku-4-5";
+  const headers: Record<string, string> = {
+    "x-api-key": apiKey,
+    "anthropic-version": "2023-06-01",
+  };
+  // Organization-level keys are not tied to a workspace, so Anthropic requires
+  // the request to name one; workspace-scoped keys do not need this.
+  const workspaceId = env.ANTHROPIC_WORKSPACE_ID?.trim();
+  if (workspaceId) headers["anthropic-workspace-id"] = workspaceId;
   const data = await postJson(
     "https://api.anthropic.com/v1/messages",
-    { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    headers,
     {
       model,
       max_tokens: MAX_OUTPUT_TOKENS,

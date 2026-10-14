@@ -9,16 +9,18 @@
 // Server-only module: never import this from a "use client" component.
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { isValidSessionId, isTranscript } from "./validation";
 import type { Persona } from "./persona";
 import type { ChatTurn, Speaker, Transcript, TranscriptEntry } from "./types";
 
 function transcriptDir(): string {
-  return path.resolve(
-    process.env.TRANSCRIPT_DIR ||
-      path.join(process.cwd(), "data", "transcripts"),
-  );
+  if (process.env.TRANSCRIPT_DIR) return path.resolve(process.env.TRANSCRIPT_DIR);
+  // Vercel's project directory is read-only; /tmp is writable but temporary, so
+  // transcripts there survive only for demos until a database replaces this module.
+  if (process.env.VERCEL) return path.join(tmpdir(), "transcripts");
+  return path.join(process.cwd(), "data", "transcripts");
 }
 
 function fileFor(sessionId: string): string {

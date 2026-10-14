@@ -114,6 +114,13 @@ public/                      # Static images and avatars
 
 ---
 
+**2026-10-14 — Anthropic workspace header and Vercel transcript folder**
+Context: An organization-level Anthropic key was rejected with 400 "not scoped to a workspace", and the Vercel preview could not write transcripts because the deployment directory is read-only.
+Decision: Send `anthropic-workspace-id` when `ANTHROPIC_WORKSPACE_ID` is set, and give 400 errors a hint naming it. When `VERCEL` is set and `TRANSCRIPT_DIR` is not, store transcripts in the OS temp folder.
+Gotcha: Vercel's `/tmp` is wiped between server instances, so hosted transcripts are for demos only until a database-backed store replaces `lib/chat/transcriptStore.ts`.
+
+---
+
 **2026-10-06 — Randomize mock chess moves**
 Context: The initial move mock always selected the first legal option, so games repeated the same simplistic move pattern.
 Decision: Select uniformly at random from the current legal move list; continue validating the choice against chess.js before applying it.
