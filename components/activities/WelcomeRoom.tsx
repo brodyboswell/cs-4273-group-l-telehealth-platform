@@ -1,8 +1,8 @@
 import Link from "next/link";
 import Image from "next/image";
 
-/** Aspect ratio of cropped welcome-room.png. */
-const ROOM_ASPECT = "1411 / 761";
+/** Aspect ratio of welcome-room.png. */
+const ROOM_ASPECT = "1280 / 720";
 
 /**
  * Welcome room hub — visual matched to docs/ui-prototypes/01-practice-room-v2.png
@@ -30,19 +30,19 @@ export function WelcomeRoom() {
           href="/practice/whiteboard"
           aria-label="Whiteboard"
           className="absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-sm focus-visible:ring-2 focus-visible:ring-sage"
-          style={{ left: "17.9%", top: "74.9%", width: "14%", height: "8%" }}
+          style={{ left: "16.9%", top: "68.7%", width: "13%", height: "8%" }}
         />
         <Link
           href="/practice/feelings"
           aria-label="Feelings"
           className="absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-sm focus-visible:ring-2 focus-visible:ring-sage"
-          style={{ left: "59%", top: "40.7%", width: "12%", height: "8%" }}
+          style={{ left: "55.1%", top: "37.4%", width: "12%", height: "8%" }}
         />
         <Link
           href="/practice/chess"
           aria-label="Chess"
           className="absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-sm focus-visible:ring-2 focus-visible:ring-sage"
-          style={{ left: "59%", top: "82.3%", width: "11%", height: "8%" }}
+          style={{ left: "55.2%", top: "75.9%", width: "10%", height: "7%" }}
         />
       </div>
     </div>
