@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "tsx --test userTextInput.test.ts"
+    "test": "node --import tsx --test userTextInput.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -17,3 +17,6 @@ out/
 Thumbs.db
 .idea/
 .vscode/
+
+# Chat transcripts (may contain learner data)
+data/

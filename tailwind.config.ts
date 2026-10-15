@@ -18,7 +18,6 @@ const config: Config = {
       },
       spacing: {
         header: "56px",
-        toolbar: "80px",
         rail: "180px",
         cam: "112px",
       },

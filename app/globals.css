@@ -19,3 +19,87 @@ body {
   background: var(--cream);
   color: var(--charcoal);
 }
+
+/* Prevent browser image ghosts when interacting with session artwork. */
+img {
+  -webkit-user-drag: none;
+}
+
+.chess-layout {
+  container-type: size;
+  --board-size: min(calc(100cqh - 28px), calc(100cqw - 276px), 820px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  padding: 20px;
+}
+
+.chess-controls {
+  width: 220px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 1100px) {
+  .chess-layout {
+    --board-size: min(calc(100cqw - 24px), calc(100cqh - 196px), 820px);
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .chess-controls {
+    width: var(--board-size);
+    max-height: 160px;
+    overflow: auto;
+    padding: 12px;
+  }
+}
+
+.room-container {
+  container-type: size;
+}
+
+.room-stage {
+  width: min(100cqw, calc(100cqh * 1708 / 921));
+  aspect-ratio: 1708 / 921;
+}
+
+/* Excalidraw keeps canvas behavior and history; the labeled toolbar replaces
+   its advanced tool chrome only within the children's whiteboard. */
+.kid-whiteboard .excalidraw .App-menu_top,
+.kid-whiteboard .excalidraw .App-toolbar--mobile,
+.kid-whiteboard .excalidraw .App-menu__left,
+.kid-whiteboard .excalidraw .HintViewer,
+.kid-whiteboard .excalidraw .layer-ui__wrapper__top-right,
+.kid-whiteboard .excalidraw .footer-center {
+  display: none !important;
+}
+
+.kid-whiteboard .excalidraw .undo-redo-buttons button {
+  width: auto;
+  min-width: 72px;
+  padding: 0 10px;
+}
+
+.kid-whiteboard .excalidraw .undo-redo-buttons button .ToolIcon__icon {
+  gap: 6px;
+}
+
+.kid-whiteboard .excalidraw .undo-button-container .ToolIcon__icon::after {
+  content: "Undo";
+}
+
+.kid-whiteboard .excalidraw .redo-button-container .ToolIcon__icon::after {
+  content: "Redo";
+}
+
+.kid-whiteboard .excalidraw {
+  --color-surface-low: #f7f6f2;
+}
+
+@media (max-width: 640px) {
+  .kid-whiteboard .excalidraw .zoom-actions {
+    display: none;
+  }
+}

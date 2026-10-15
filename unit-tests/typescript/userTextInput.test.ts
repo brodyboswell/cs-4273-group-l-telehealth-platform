@@ -1,11 +1,11 @@
 /**
  * Unit test for the user text input feature (TypeScript).
- * Run with: npx tsx --test userTextInput.test.ts
+ * Run with: npm test
  */
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { processUserTextInput } from "./userTextInput";
+import { processUserTextInput } from "./userTextInput.js";
 
 describe("processUserTextInput", () => {
   it("trims and accepts non-empty user text", () => {
