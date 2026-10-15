@@ -8,7 +8,7 @@ import { useRoomState } from "@/components/session/RoomState";
 const ACTIVITIES = [
   { id: "whiteboard", label: "Whiteboard", x: 6, y: 25, width: 21, height: 63 },
   { id: "feelings", label: "Feelings", x: 50, y: 8, width: 19, height: 28 },
-  { id: "chess", label: "Chess", x: 60, y: 71, width: 21, height: 12 },
+  { id: "chess", label: "Chess", x: 55, y: 64, width: 21, height: 12 },
 ] as const;
 
 type Position = { x: number; y: number };
