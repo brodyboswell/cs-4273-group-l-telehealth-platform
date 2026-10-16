@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { Icon } from "@/components/ui/Icon";
+import { signOut } from "@/lib/auth/mockAuth";
 
 function ToolbarLink({
   href,
@@ -71,6 +73,13 @@ function ClientControlToggle() {
 }
 
 export function SessionToolbar() {
+  const router = useRouter();
+
+  async function handleEndSession() {
+    const { redirectTo } = await signOut();
+    router.replace(redirectTo);
+  }
+
   return (
     <footer className="flex h-16 shrink-0 justify-between gap-4 items-center overflow-hidden border-t border-charcoal/15 bg-white px-4">
       <div className="flex min-w-0 items-center justify-start gap-0.5 overflow-hidden">
@@ -103,9 +112,10 @@ export function SessionToolbar() {
         />
         <button
           type="button"
+          onClick={handleEndSession}
           aria-label="End session"
           title="End session"
-          className="flex shrink-0 items-center gap-2 rounded-panel bg-terracotta px-3 py-2 text-sm font-medium text-white"
+          className="flex shrink-0 items-center gap-2 rounded-panel bg-terracotta px-3 py-2 text-sm font-medium text-white hover:bg-terracotta/90"
         >
           <Icon name="phone" />
           <span className="hidden sm:inline">End session</span>
