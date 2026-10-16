@@ -114,6 +114,14 @@ public/                      # Static images and avatars
 
 ---
 
+**2026-10-15 — Login UI placeholder (issue #24)**
+Context: The app needs a login screen that a real auth backend can be connected to later.
+Decision: Add `/login` (now the root redirect target) with a `LoginForm` that calls `signIn` in `lib/auth/mockAuth.ts` through typed `LoginCredentials`/`LoginResult`. The mock accepts any input and redirects to `/practice`. Inputs are uncontrolled, read only on submit, never logged or persisted, and the form is reset before navigating. The toolbar's End session button calls the mock `signOut` and replaces the route with `/login`.
+Rationale: Swapping the mock for a real `signIn` implementation requires no UI changes; failure results and thrown errors already render human-readable messages.
+Gotcha: `/practice` routes are not protected — there is no session or token yet. Add route protection (e.g. middleware) when the backend lands.
+
+---
+
 **2026-10-06 — Randomize mock chess moves**
 Context: The initial move mock always selected the first legal option, so games repeated the same simplistic move pattern.
 Decision: Select uniformly at random from the current legal move list; continue validating the choice against chess.js before applying it.
