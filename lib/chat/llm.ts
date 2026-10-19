@@ -186,11 +186,11 @@ async function callOpenAI(
 }
 
 const MOCK_REPLIES = [
-  "*shrugs* I dunno. It's been kind of a lot lately, I guess.",
-  "Classes are… fine. I mean, I've missed some. More than some.",
-  "I just don't really feel like going. It's easier to stay in my room.",
-  "My parents don't know about the grades yet. That's kind of the worst part.",
-  "Yeah. It's lonely here, honestly. Everyone already has their people.",
+  "Ummm, okay I guess.",
+  "School's just... a lot. Like, the rules here are so weird.",
+  "I like chess. I'm not that good, but it's better than just sitting around.",
+  "I dunno. Can we talk about something else? Wait, no, what was I saying...",
+  "Yeah, so my lunch was expired the other day, like actually expired. Nobody even cared. I just ate it anyway.",
 ];
 
 /** Deterministic offline replies so the chat can be demoed without an API key. */
