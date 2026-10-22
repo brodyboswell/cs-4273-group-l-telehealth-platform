@@ -131,6 +131,30 @@ Gotcha: This is a layout and navigation change. Activity requests and structured
 
 ---
 
+**2026-10-15 — Login UI placeholder (issue #24)**
+Context: The app needs a login screen that a real auth backend can be connected to later.
+Decision: Add `/login` (now the root redirect target) with a `LoginForm` that calls `signIn` in `lib/auth/mockAuth.ts` through typed `LoginCredentials`/`LoginResult`. The mock accepts any input and redirects to `/practice`. Inputs are uncontrolled, read only on submit, never logged or persisted, and the form is reset before navigating. The toolbar's End session button calls the mock `signOut` and replaces the route with `/login`.
+Rationale: Swapping the mock for a real `signIn` implementation requires no UI changes; failure results and thrown errors already render human-readable messages.
+Gotcha: `/practice` routes are not protected — there is no session or token yet. Add route protection (e.g. middleware) when the backend lands.
+
+---
+
+**2026-10-06 — Randomize mock chess moves**
+Context: The initial move mock always selected the first legal option, so games repeated the same simplistic move pattern.
+Decision: Select uniformly at random from the current legal move list; continue validating the choice against chess.js before applying it.
+Rationale: Gives prototype games more variation while preserving legal-move enforcement.
+Gotcha: Random selection is intentionally not strategic; use an LLM or chess engine for meaningful play.
+
+---
+
+**2026-10-06 — Mock virtual-client chess moves**
+Context: ChessBoard supported local human moves through chess.js but had no client move request/response boundary.
+Decision: Add typed chess move requests and validated `play_chess_move` actions behind a deterministic local mock. Let the learner choose a color, automatically request a client move on its turn, display a short inline client line, and undo a completed human/client turn as a pair.
+Rationale: Exercises the same request/parse/apply boundary as FeelingsCheck while keeping legal move enforcement in chess.js and avoiding premature provider or browser-control integration.
+Gotcha: Chess state and client utterances remain local to the activity and are not yet written to the session transcript. The mock picks the first legal move; replace its strategy when LLM-backed play is added.
+
+---
+
 **2026-10-01 — Repository cleanup and regression checks**
 Context: Repository review found unused prototype code, per-pointer chess history recomputation, drawing redraw overhead, stale chat request races, and inconsistent transcript error handling.
 Decision: Remove the unused annotation rail, old raster avatars, unused feeling prompts/persona registry, and unused toolbar spacing token. Cache chess derivations per position and use chess.js move/undo history directly. Batch feelings drawing updates by animation frame. Share chat validation, abort stale transcript loads, reconcile uncertain sends with the server log, validate stored/provider data, return consistent uncached JSON errors, and bound transcript archive reads. Add ESLint, typecheck, and isolated Node/tsx regression tests; explicitly scope Next.js file tracing to the repository.
@@ -195,6 +219,8 @@ Rationale: The whiteboard should feel like an activity inside the telehealth pra
 
 ## Next Up
 
+- [ ] Replace the deterministic chess move mock with an LLM-backed strategy.
+- [ ] Add ordered chess move and client-line entries to the session log.
 - [x] Install `@excalidraw/excalidraw`.
 - [x] Add a client-only Excalidraw wrapper compatible with Next.js SSR.
 - [x] Replace the static whiteboard placeholder while preserving the session layout.

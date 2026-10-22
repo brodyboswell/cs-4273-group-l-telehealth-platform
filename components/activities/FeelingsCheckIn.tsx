@@ -164,20 +164,20 @@ export function FeelingsCheckIn() {
   return (
     <div className="h-full overflow-y-auto bg-charcoal p-3 sm:p-6">
       <div className="mx-auto w-full max-w-2xl rounded-panel bg-white p-5 shadow-sm sm:px-10 sm:py-8">
-        <div className="mb-4 flex justify-start">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold text-charcoal">
+            How are you feeling?
+          </h1>
           <button
             type="button"
             aria-pressed={drawing}
             onClick={() => setDrawing(!drawing)}
-            className="flex items-center gap-2 rounded-panel border border-charcoal/30 bg-cream px-4 py-2 text-sm"
+            className="ml-auto flex shrink-0 items-center gap-2 rounded-panel border border-charcoal/30 bg-cream px-4 py-2 text-sm"
           >
             <Icon name={drawing ? "pointer" : "pen"} />
             {drawing ? "Select feelings" : "Draw on board"}
           </button>
         </div>
-        <h1 className="text-2xl font-semibold text-charcoal">
-          How are you feeling?
-        </h1>
         <p id="feelings-instructions" className="sr-only">
           {drawing
             ? "Draw anywhere on the board to express how you feel."

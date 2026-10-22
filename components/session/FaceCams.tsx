@@ -28,8 +28,8 @@ function Cam({
         <Image
           src={src}
           alt={label}
-          width={112}
-          height={112}
+          width={336}
+          height={336}
           className="h-full w-full object-cover object-center"
           unoptimized
           priority
