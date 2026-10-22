@@ -8,6 +8,13 @@
  * browser, so the log is the single source of truth for what was said.
  */
 import { generateClientReply, LlmError } from "@/lib/chat/llm";
+import { activityRegistry } from "@/lib/activities/catalog";
+import {
+  ActivityRegistryError,
+  buildAvailabilityMessage,
+  buildActivityContext,
+  type ResolvedActivity,
+} from "@/lib/activities/registry";
 import { DEFAULT_PERSONA } from "@/lib/chat/persona";
 import {
   appendEntry,
@@ -21,6 +28,7 @@ import {
   isValidSessionId,
   MAX_MESSAGE_LENGTH,
 } from "@/lib/chat/validation";
+import type { ActivityAction } from "@/lib/activities/types";
 import type { ChatResponseBody } from "@/lib/chat/types";
 
 export const runtime = "nodejs";
@@ -54,20 +62,120 @@ export async function POST(request: Request) {
     );
   }
 
+  let activeActivity: ResolvedActivity | null = null;
+  if (body.activity !== undefined) {
+    try {
+      activeActivity = activityRegistry.resolve(body.activity);
+    } catch (err) {
+      return jsonError(
+        400,
+        err instanceof ActivityRegistryError
+          ? err.message
+          : "Activity context is invalid.",
+      );
+    }
+  }
+
   try {
     const result = await withSessionLock(sessionId, async () => {
       const transcript = await getOrCreateTranscript(
         sessionId,
         DEFAULT_PERSONA,
       );
-      const learnerEntry = await appendEntry(transcript, "learner", text);
+      const toolNames = (activeActivity?.tools ?? [])
+        .map(({ name }) => name)
+        .sort();
+      if (activeActivity && toolNames.length > 0) {
+        const previousLearnerEntry = [...transcript.entries]
+          .reverse()
+          .find((entry) => entry.speaker === "learner");
+        const previousNotice = [...transcript.entries]
+          .reverse()
+          .find((entry) => entry.activityNotice)?.activityNotice;
+        const sameActivity =
+          previousLearnerEntry?.activity?.activityId ===
+          activeActivity.activityId;
+        const sameTools =
+          previousNotice?.activityId === activeActivity.activityId &&
+          previousNotice.toolNames.join("\0") === toolNames.join("\0");
+
+        if (!sameActivity || !sameTools) {
+          await appendEntry(
+            transcript,
+            "virtual_client",
+            buildAvailabilityMessage(activeActivity),
+            {
+              activityNotice: {
+                activityId: activeActivity.activityId,
+                toolNames,
+              },
+            },
+          );
+        }
+      }
+
+      const learnerEntry = await appendEntry(
+        transcript,
+        "learner",
+        text,
+        {
+          activity: activeActivity
+            ? {
+                activityId: activeActivity.activityId,
+                state: activeActivity.state,
+              }
+            : null,
+        },
+      );
 
       const started = performance.now();
       try {
-        const reply = await generateClientReply(
-          DEFAULT_PERSONA.systemPrompt,
-          toChatHistory(transcript),
+        const activityContext = activeActivity
+          ? buildActivityContext(activeActivity)
+          : null;
+        const systemPrompt = activityContext
+          ? `${DEFAULT_PERSONA.systemPrompt}\n\n${activityContext}`
+          : DEFAULT_PERSONA.systemPrompt;
+        const tools = (activeActivity?.tools ?? []).map(
+          ({ name, description, inputSchema, mockInput }) => ({
+            name,
+            description,
+            inputSchema,
+            ...(mockInput !== undefined ? { mockInput } : {}),
+          }),
         );
+        const reply = await generateClientReply(
+          systemPrompt,
+          toChatHistory(transcript),
+          process.env,
+          tools,
+        );
+
+        const actions: ActivityAction[] = [];
+        for (const call of reply.toolCalls) {
+          try {
+            if (!activeActivity)
+              throw new ActivityRegistryError(
+                `No active activity is available for tool "${call.name}".`,
+              );
+            actions.push(
+              activityRegistry.validateAction(
+                activeActivity.activityId,
+                call.name,
+                call.input,
+              ),
+            );
+          } catch (err) {
+            const reason =
+              err instanceof Error ? err.message : "Invalid tool call.";
+            await appendEntry(
+              transcript,
+              "system",
+              `Rejected activity tool call "${call.name.slice(0, 80)}": ${reason.slice(0, 240)}`,
+            );
+          }
+        }
+
         const replyEntry = await appendEntry(
           transcript,
           "virtual_client",
@@ -75,6 +183,7 @@ export async function POST(request: Request) {
           {
             model: reply.model,
             latencyMs: Math.round(performance.now() - started),
+            ...(actions.length > 0 ? { actions } : {}),
           },
         );
         return {

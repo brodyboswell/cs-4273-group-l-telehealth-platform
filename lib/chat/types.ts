@@ -6,6 +6,11 @@
  * - "virtual_client" = the simulated patient ("Alex") whose replies come from the LLM.
  * - "system"         = events the platform records itself (session start, errors).
  */
+import type {
+  ActivityAvailabilityNotice,
+  ActivityAction,
+  ActivitySnapshot,
+} from "@/lib/activities/types";
 
 export type Speaker = "learner" | "virtual_client" | "system";
 
@@ -20,6 +25,12 @@ export interface TranscriptEntry {
   latencyMs?: number;
   /** For virtual_client entries: which provider/model produced the reply. */
   model?: string;
+  /** Validated activity state accompanying a learner message. */
+  activity?: ActivitySnapshot | null;
+  /** Validated activity actions returned by the virtual client. */
+  actions?: ActivityAction[];
+  /** Metadata for a platform-generated, client-visible activity notice. */
+  activityNotice?: ActivityAvailabilityNotice;
 }
 
 export interface Transcript {
@@ -41,6 +52,7 @@ export interface ChatTurn {
 export interface ChatRequestBody {
   sessionId: string;
   message: string;
+  activity?: ActivitySnapshot;
 }
 
 /** Successful response of POST /api/chat */

@@ -12,6 +12,7 @@ import type {
   Transcript,
   TranscriptEntry,
 } from "@/lib/chat/types";
+import { useActivityBridge } from "@/components/session/ActivityBridge";
 
 const SESSION_STORAGE_KEY = "telehealth.practiceSessionId";
 
@@ -51,6 +52,7 @@ function formatTime(iso: string) {
 }
 
 export function ChatPanel({ compact = false }: { compact?: boolean }) {
+  const activityBridge = useActivityBridge();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [clientName, setClientName] = useState("Alex");
@@ -132,6 +134,8 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
     const text = draft.trim();
     if (!text || !sessionId || loading || sendInFlight.current) return;
 
+    const activityCapture = activityBridge.capture();
+    const activity = activityCapture.snapshot;
     sendInFlight.current = true;
     const lastSeq = entries.at(-1)?.seq ?? 0;
 
@@ -155,6 +159,7 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
         body: JSON.stringify({
           sessionId,
           message: text,
+          ...(activity ? { activity } : {}),
         } satisfies ChatRequestBody),
       });
 
@@ -182,6 +187,13 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
         throw new Error("Invalid chat response");
 
       setEntries(data.transcript.entries);
+      const actions = data.transcript.entries
+        .filter(
+          (entry) =>
+            entry.seq > lastSeq && entry.speaker === "virtual_client",
+        )
+        .flatMap((entry) => entry.actions ?? []);
+      activityCapture.dispatch(actions);
     } catch {
       if (activeSession.current !== sessionId) return;
 
@@ -222,7 +234,11 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
     void loadTranscript(id);
   }
 
-  const visible = entries.filter((e) => e.speaker !== "system");
+  const visible = entries.filter(
+    (entry) =>
+      entry.speaker !== "system" &&
+      (entry.speaker === "learner" || entry.text.trim().length > 0),
+  );
 
   const transcriptUrl = sessionId
     ? `/api/transcripts/${encodeURIComponent(sessionId)}`

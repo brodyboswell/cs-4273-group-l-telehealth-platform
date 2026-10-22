@@ -20,22 +20,55 @@ The key is only read inside the API route on the server. The browser never sees 
 ## How it fits together
 
 ```
-ChatPanel (browser)  --POST /api/chat {sessionId, message}-->  app/api/chat/route.ts
+ChatPanel (browser)  --POST /api/chat {sessionId, message, activity?}-->  app/api/chat/route.ts
                                                                   1. append learner entry to transcript
-                                                                  2. build history from the transcript
-                                                                  3. lib/chat/llm.ts -> Anthropic / OpenAI / mock
-                                                                  4. append virtual_client entry (+model, latency)
+                                                                  2. resolve and describe registered activity (if present)
+                                                                  3. build history from the transcript
+                                                                  4. lib/chat/llm.ts -> Anthropic / OpenAI / mock
+                                                                  5. validate and append the reply and activity actions
                      <-- {reply, learnerEntry, transcript} ------
 ```
 
 The conversation history always comes from the **server-side transcript**, not the browser.
 That makes the transcript the single source of truth for grading and research.
 
+## Activity context and tools
+
+When an activity is open, its component registers its stable activity ID, current serializable state, and action handler through `useActivityTools` in `components/session/ActivityBridge.tsx`. `SessionShell` provides the bridge to both the activity and the persistent `ChatPanel`. On send, the panel includes the current `{ activityId, state }` snapshot alongside the learner's unchanged message. Returning to the main room unregisters the activity, so chat sends no activity snapshot.
+
+Example request while the feelings chart is open:
+
+```json
+{
+  "sessionId": "demo-session-1",
+  "message": "I don't know how to describe it.",
+  "activity": {
+    "activityId": "feelings",
+    "state": { "selectedMoodId": null }
+  }
+}
+```
+
+The browser snapshot is untrusted. `lib/activities/catalog.ts` contains the allowed activity definitions; `lib/activities/registry.ts` rejects unknown IDs and validates the state before using the activity's server-authored description and tool schemas. Only the active activity's tools are sent to the provider. Anthropic and OpenAI requests are mapped from the shared schema in `lib/chat/llm.ts`; the mock provider uses an optional deterministic `mockInput`.
+
+The server validates each provider call with that activity tool's `parseInput` before returning it. Accepted actions are recorded on the virtual-client transcript entry, next to the reply. Rejected calls create a system audit entry and are never dispatched. `ChatPanel` dispatches accepted actions only to the same mounted activity instance that was active when the learner sent the message; stale actions stay logged but are not applied.
+
+When an activity with tools becomes active, the server adds a short virtual-client message such as “I can interact with the feelings chart while we talk.” The notice is transcript-backed and records the activity and announced tool names. It is sent once for a stable activity/tool set, then repeated only when the learner returns to that activity or the available tool set changes.
+
+### Adding an activity
+
+1. Add a definition under `lib/activities/` with an ID, short label, state parser, state description, provider-neutral tool schemas, and an input parser for each action.
+2. Add the definition to `lib/activities/catalog.ts`. The server registry will then accept its ID and offer its tools only while that activity is active.
+3. In the activity component, call `useActivityTools(activityId, serializableState, onAction)`. Keep the state limited to the information the client needs to see and act on; apply only the action names and inputs that component understands.
+4. Add registry and chat API coverage for valid and invalid state/actions. Provider-specific chat code should not need activity-specific branches.
+
+The feelings chart is the first registered example: it provides `select_mood`, validates the selected mood against `MOOD_OPTIONS`, and updates the selected card through the bridge. The pattern is intended to support chess and other activities through their own definition and handler.
+
 ## Endpoints
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/chat` | Body `{ "sessionId": "...", "message": "..." }` → Alex's reply plus the full transcript |
+| POST | `/api/chat` | Body `{ "sessionId": "...", "message": "...", "activity?": { "activityId": "...", "state": {} } }` → client reply, validated actions, and the full transcript |
 | GET | `/api/transcripts/:sessionId` | Transcript as JSON (creates the session and its opening line if it's new) |
 | GET | `/api/transcripts/:sessionId?format=txt` | Readable text transcript; add `&download=1` to download |
 | GET | `/api/transcripts` | List of all recorded sessions (newest first) |
@@ -65,13 +98,15 @@ Saved as `data/transcripts/<sessionId>.json` (change the folder with `TRANSCRIPT
   "entries": [
     { "seq": 1, "speaker": "system", "text": "Session started with virtual client Alex (alex-rapport-v1).", "timestamp": "..." },
     { "seq": 2, "speaker": "virtual_client", "text": "Hey. Um… my advisor said I should do this.", "timestamp": "...", "model": "scripted:opening-line" },
-    { "seq": 3, "speaker": "learner", "text": "Hi Alex, thanks for coming in today.", "timestamp": "..." },
-    { "seq": 4, "speaker": "virtual_client", "text": "*shrugs* I dunno…", "timestamp": "...", "model": "anthropic:claude-haiku-4-5", "latencyMs": 812 }
+    { "seq": 3, "speaker": "virtual_client", "text": "I can interact with the feelings chart while we talk.", "timestamp": "...", "activityNotice": { "activityId": "feelings", "toolNames": ["select_mood"] } },
+    { "seq": 4, "speaker": "learner", "text": "Hi Alex, thanks for coming in today.", "timestamp": "...", "activity": { "activityId": "feelings", "state": { "selectedMoodId": null } } },
+    { "seq": 5, "speaker": "virtual_client", "text": "I think I'm worried.", "timestamp": "...", "model": "anthropic:claude-haiku-4-5", "latencyMs": 812, "actions": [{ "activityId": "feelings", "tool": "select_mood", "input": { "type": "select_mood", "moodId": "worried", "rationale": "Something has been on my mind." } }] }
   ]
 }
 ```
 
-- `speaker`: `learner` (the student), `virtual_client` (Alex), `system` (session start, failed replies).
+- `speaker`: `learner` (the student), `virtual_client` (Alex or a platform-generated client-facing notice), `system` (session start, failed replies, rejected tool calls).
+- `activity` stores the validated state snapshot sent with a learner message (`null` means no activity was active); `actions` stores validated activity calls; `activityNotice` records which tools a visible client notice announced.
 - `seq` is strictly increasing; messages in the same session are processed one at a time within one server process. Locks do not coordinate separate workers or server instances.
 - If the AI fails, the learner's message is still kept and a `system` entry records the failure.
 

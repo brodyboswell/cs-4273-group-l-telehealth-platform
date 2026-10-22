@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { ActivityBridgeProvider } from "./ActivityBridge";
 import { FaceCams } from "./FaceCams";
 import { SessionHeader } from "./SessionHeader";
 import { SessionToolbar } from "./SessionToolbar";
@@ -73,53 +74,55 @@ export function SessionShell({ children }: { children: React.ReactNode }) {
   const chatTabClassName = sideChatPage ? "session-chat-tab" : "hidden";
 
   return (
-    <RoomStateProvider>
-      <div className="relative flex h-dvh flex-col overflow-hidden bg-cream">
-        <SessionHeader />
-        <div className="session-room-body relative flex min-h-0 flex-1">
-          <FaceCams darkRail={activityPage} />
-          <main className={activityPaneClassName}>{children}</main>
-          <aside
-            className={chatSidebarClassName}
-            aria-label="Session chat"
-            onKeyDown={(event) => {
-              if (mobileChatExpanded && event.key === "Escape") {
-                closeMobileChat();
-              }
-            }}
-          >
-            <button
-              ref={chatTabRef}
-              type="button"
-              className={chatTabClassName}
-              aria-label="Open session chat"
-              aria-controls="session-chat-content"
-              aria-expanded={mobileChatExpanded}
-              onClick={() => {
-                setExpandedChatPath(pathname);
-                requestAnimationFrame(() => closeChatRef.current?.focus());
+    <ActivityBridgeProvider>
+      <RoomStateProvider>
+        <div className="relative flex h-dvh flex-col overflow-hidden bg-cream">
+          <SessionHeader />
+          <div className="session-room-body relative flex min-h-0 flex-1">
+            <FaceCams darkRail={activityPage} />
+            <main className={activityPaneClassName}>{children}</main>
+            <aside
+              className={chatSidebarClassName}
+              aria-label="Session chat"
+              onKeyDown={(event) => {
+                if (mobileChatExpanded && event.key === "Escape") {
+                  closeMobileChat();
+                }
               }}
             >
-              Chat
-            </button>
-            <div id="session-chat-content" className="session-chat-content">
-              <div className="session-chat-mobile-header">
-                <span>Session chat</span>
-                <button
-                  ref={closeChatRef}
-                  type="button"
-                  onClick={closeMobileChat}
-                  aria-label="Close session chat"
-                >
-                  Close
-                </button>
+              <button
+                ref={chatTabRef}
+                type="button"
+                className={chatTabClassName}
+                aria-label="Open session chat"
+                aria-controls="session-chat-content"
+                aria-expanded={mobileChatExpanded}
+                onClick={() => {
+                  setExpandedChatPath(pathname);
+                  requestAnimationFrame(() => closeChatRef.current?.focus());
+                }}
+              >
+                Chat
+              </button>
+              <div id="session-chat-content" className="session-chat-content">
+                <div className="session-chat-mobile-header">
+                  <span>Session chat</span>
+                  <button
+                    ref={closeChatRef}
+                    type="button"
+                    onClick={closeMobileChat}
+                    aria-label="Close session chat"
+                  >
+                    Close
+                  </button>
+                </div>
+                <ChatPanel compact={sideChatPage} />
               </div>
-              <ChatPanel compact={sideChatPage} />
-            </div>
-          </aside>
+            </aside>
+          </div>
+          <SessionToolbar />
         </div>
-        <SessionToolbar />
-      </div>
-    </RoomStateProvider>
+      </RoomStateProvider>
+    </ActivityBridgeProvider>
   );
 }

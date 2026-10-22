@@ -110,7 +110,10 @@ function pushEntry(
   t: Transcript,
   speaker: Speaker,
   text: string,
-  extra: Pick<TranscriptEntry, "latencyMs" | "model"> = {},
+  extra: Pick<
+    TranscriptEntry,
+    "latencyMs" | "model" | "activity" | "actions" | "activityNotice"
+  > = {},
 ): TranscriptEntry {
   const entry: TranscriptEntry = {
     seq: t.entries.length + 1,
@@ -128,7 +131,10 @@ export async function appendEntry(
   t: Transcript,
   speaker: Speaker,
   text: string,
-  extra: Pick<TranscriptEntry, "latencyMs" | "model"> = {},
+  extra: Pick<
+    TranscriptEntry,
+    "latencyMs" | "model" | "activity" | "actions" | "activityNotice"
+  > = {},
 ): Promise<TranscriptEntry> {
   const entry = pushEntry(t, speaker, text, extra);
   await writeTranscript(t);
@@ -223,9 +229,18 @@ export function formatTranscriptText(t: Transcript): string {
     `Entries: ${t.entries.length}`,
     "".padEnd(60, "-"),
   ];
-  const lines = t.entries.map(
-    (e) =>
-      `[${e.timestamp}] #${e.seq} ${SPEAKER_LABEL[e.speaker](t)}: ${e.text}`,
-  );
+  const lines = t.entries.flatMap((e) => [
+    `[${e.timestamp}] #${e.seq} ${SPEAKER_LABEL[e.speaker](t)}: ${e.text}`,
+    ...(e.activity
+      ? [`  Activity context (${e.activity.activityId}): ${JSON.stringify(e.activity.state)}`]
+      : []),
+    ...(e.actions ?? []).map(
+      (action) =>
+        `  Activity action (${action.activityId}.${action.tool}): ${JSON.stringify(action.input)}`,
+    ),
+    ...(e.activityNotice
+      ? [`  Available tools: ${e.activityNotice.toolNames.join(", ")}`]
+      : []),
+  ]);
   return [...header, ...lines, ""].join("\n");
 }

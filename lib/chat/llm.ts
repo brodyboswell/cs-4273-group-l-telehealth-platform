@@ -13,15 +13,29 @@
 // Server-only module: never import this from a "use client" component.
 import { isRecord } from "./validation";
 import type { ChatTurn } from "./types";
+import type { ToolInputSchema } from "@/lib/activities/types";
 
 type ProviderEnvironment = Record<string, string | undefined>;
 
 export type ProviderName = "anthropic" | "openai" | "mock";
 
+export interface LlmToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: ToolInputSchema;
+  mockInput?: unknown;
+}
+
+export interface LlmToolCall {
+  name: string;
+  input: unknown;
+}
+
 export interface LlmReply {
   text: string;
   /** "provider:model", stored in the transcript for research traceability. */
   model: string;
+  toolCalls: LlmToolCall[];
 }
 
 export class LlmError extends Error {
@@ -63,15 +77,16 @@ export async function generateClientReply(
   systemPrompt: string,
   history: ChatTurn[],
   env: ProviderEnvironment = process.env,
+  tools: readonly LlmToolDefinition[] = [],
 ): Promise<LlmReply> {
   const provider = resolveProvider(env);
   switch (provider) {
     case "anthropic":
-      return callAnthropic(systemPrompt, history, env);
+      return callAnthropic(systemPrompt, history, env, tools);
     case "openai":
-      return callOpenAI(systemPrompt, history, env);
+      return callOpenAI(systemPrompt, history, env, tools);
     case "mock":
-      return mockReply(history);
+      return mockReply(history, tools);
   }
 }
 
@@ -126,6 +141,7 @@ async function callAnthropic(
   systemPrompt: string,
   history: ChatTurn[],
   env: ProviderEnvironment,
+  tools: readonly LlmToolDefinition[],
 ): Promise<LlmReply> {
   const apiKey = requireKey(env.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY");
   const model = env.ANTHROPIC_MODEL || "claude-haiku-4-5";
@@ -137,9 +153,19 @@ async function callAnthropic(
       max_tokens: MAX_OUTPUT_TOKENS,
       system: systemPrompt,
       messages: history,
+      ...(tools.length > 0
+        ? {
+            tools: tools.map(({ name, description, inputSchema }) => ({
+              name,
+              description,
+              input_schema: inputSchema,
+            })),
+          }
+        : {}),
     },
   );
-  const text = (Array.isArray(data.content) ? data.content : [])
+  const content = Array.isArray(data.content) ? data.content : [];
+  const text = content
     .filter(
       (block: unknown): block is { type: "text"; text: string } =>
         isRecord(block) &&
@@ -149,10 +175,21 @@ async function callAnthropic(
     .map((block) => block.text)
     .join("")
     .trim();
-  if (!text) throw new LlmError("The AI provider returned an empty reply.");
+  const toolBlocks = content.filter(
+    (block): block is Record<string, unknown> =>
+      isRecord(block) && block.type === "tool_use",
+  );
+  const toolCalls = toolBlocks.map((block): LlmToolCall => {
+    if (typeof block.name !== "string" || !("input" in block))
+      throw new LlmError("The AI provider returned an invalid tool call.");
+    return { name: block.name, input: block.input };
+  });
+  if (!text && toolCalls.length === 0)
+    throw new LlmError("The AI provider returned an empty reply.");
   return {
     text,
     model: `anthropic:${typeof data.model === "string" ? data.model : model}`,
+    toolCalls,
   };
 }
 
@@ -160,6 +197,7 @@ async function callOpenAI(
   systemPrompt: string,
   history: ChatTurn[],
   env: ProviderEnvironment,
+  tools: readonly LlmToolDefinition[],
 ): Promise<LlmReply> {
   const apiKey = requireKey(env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const model = env.OPENAI_MODEL || "gpt-4o-mini";
@@ -170,6 +208,14 @@ async function callOpenAI(
       model,
       max_completion_tokens: MAX_OUTPUT_TOKENS,
       messages: [{ role: "system", content: systemPrompt }, ...history],
+      ...(tools.length > 0
+        ? {
+            tools: tools.map(({ name, description, inputSchema }) => ({
+              type: "function",
+              function: { name, description, parameters: inputSchema },
+            })),
+          }
+        : {}),
     },
   );
   const choice: unknown = Array.isArray(data.choices) ? data.choices[0] : null;
@@ -178,10 +224,33 @@ async function callOpenAI(
     isRecord(message) && typeof message.content === "string"
       ? message.content.trim()
       : "";
-  if (!text) throw new LlmError("The AI provider returned an empty reply.");
+  const rawToolCalls = isRecord(message) ? message.tool_calls : undefined;
+  if (rawToolCalls !== undefined && !Array.isArray(rawToolCalls))
+    throw new LlmError("The AI provider returned invalid tool calls.");
+  const toolCalls = (Array.isArray(rawToolCalls) ? rawToolCalls : []).map(
+    (call): LlmToolCall => {
+      const fn = isRecord(call) ? call.function : null;
+      if (
+        !isRecord(fn) ||
+        typeof fn.name !== "string" ||
+        typeof fn.arguments !== "string"
+      )
+        throw new LlmError("The AI provider returned an invalid tool call.");
+      let input: unknown;
+      try {
+        input = JSON.parse(fn.arguments);
+      } catch {
+        throw new LlmError("The AI provider returned invalid tool arguments.");
+      }
+      return { name: fn.name, input };
+    },
+  );
+  if (!text && toolCalls.length === 0)
+    throw new LlmError("The AI provider returned an empty reply.");
   return {
     text,
     model: `openai:${typeof data.model === "string" ? data.model : model}`,
+    toolCalls,
   };
 }
 
@@ -194,10 +263,20 @@ const MOCK_REPLIES = [
 ];
 
 /** Deterministic offline replies so the chat can be demoed without an API key. */
-function mockReply(history: ChatTurn[]): LlmReply {
+function mockReply(
+  history: ChatTurn[],
+  tools: readonly LlmToolDefinition[],
+): LlmReply {
   const learnerTurns = history.filter((t) => t.role === "user").length;
   // History starts with a synthetic "session connected" user turn, so skip it.
   const text =
     MOCK_REPLIES[Math.max(0, learnerTurns - 2) % MOCK_REPLIES.length];
-  return { text, model: "mock:offline" };
+  const mockTool = tools.find((tool) => tool.mockInput !== undefined);
+  return {
+    text,
+    model: "mock:offline",
+    toolCalls: mockTool
+      ? [{ name: mockTool.name, input: mockTool.mockInput }]
+      : [],
+  };
 }

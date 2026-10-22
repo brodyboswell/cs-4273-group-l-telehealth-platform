@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   MOOD_OPTIONS,
   parseMoodAgentAction,
   type MoodAgentAction,
   type MoodId,
 } from "@/lib/mood/moodTypes";
-import { requestMockAgentMood } from "@/lib/mood/mockAgent";
+import type { ActivityAction } from "@/lib/activities/types";
+import { useActivityTools } from "@/components/session/ActivityBridge";
 import { Icon } from "@/components/ui/Icon";
 import { FeelingsDrawing } from "./FeelingsDrawing";
 
@@ -139,27 +140,29 @@ export function FeelingsCheckIn() {
   const [drawing, setDrawing] = useState(false);
   const [selectedMoodId, setSelectedMoodId] = useState<MoodId | null>(null);
   const [agentAction, setAgentAction] = useState<MoodAgentAction | null>(null);
-  const [isRequesting, setIsRequesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const selectedMood = MOOD_OPTIONS.find((mood) => mood.id === selectedMoodId);
 
-  async function handleGetAgentMood() {
-    setIsRequesting(true);
-    setError(null);
+  const activityState = useMemo(() => ({ selectedMoodId }), [selectedMoodId]);
+  const handleActivityAction = useCallback((action: ActivityAction) => {
+    if (action.activityId !== "feelings" || action.tool !== "select_mood")
+      return;
+
     try {
-      const action = parseMoodAgentAction(await requestMockAgentMood());
-      setSelectedMoodId(action.moodId);
-      setAgentAction(action);
-    } catch (requestError) {
+      const selected = parseMoodAgentAction(action.input);
+      setSelectedMoodId(selected.moodId);
+      setAgentAction(selected);
+      setError(null);
+    } catch (actionError) {
       setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "AI Bot mood request failed",
+        actionError instanceof Error
+          ? actionError.message
+          : "The client returned an invalid feeling selection.",
       );
-    } finally {
-      setIsRequesting(false);
     }
-  }
+  }, []);
+
+  useActivityTools("feelings", activityState, handleActivityAction);
 
   return (
     <div className="h-full overflow-y-auto bg-charcoal p-3 sm:p-6">
@@ -183,21 +186,6 @@ export function FeelingsCheckIn() {
             ? "Draw anywhere on the board to express how you feel."
             : "Select a feeling to talk about. All feelings are welcome."}
         </p>
-        <div className="mt-5 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={handleGetAgentMood}
-            disabled={isRequesting}
-            className="rounded-panel bg-sage px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isRequesting ? "Getting mood…" : "TEMP Get Agent Mood"}
-          </button>
-          {isRequesting && (
-            <span className="text-sm text-charcoal/60" role="status">
-              AI Bot is choosing a mood…
-            </span>
-          )}
-        </div>
         {error && (
           <p
             className="mt-4 rounded-panel border border-terracotta/30 bg-terracotta/10 px-4 py-3 text-sm text-charcoal"
@@ -233,7 +221,7 @@ export function FeelingsCheckIn() {
                   type="button"
                   key={feeling.id}
                   data-mood-id={feeling.id}
-                  disabled={drawing || isRequesting}
+                  disabled={drawing}
                   aria-pressed={active}
                   onClick={() => {
                     setSelectedMoodId(active ? null : feeling.id);
@@ -270,7 +258,7 @@ export function FeelingsCheckIn() {
             setAgentAction(null);
             setError(null);
           }}
-          disabled={!selectedMoodId || isRequesting}
+          disabled={!selectedMoodId}
           className="mt-3 rounded-panel border border-charcoal/30 px-3 py-2 text-sm text-charcoal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-charcoal disabled:opacity-40"
         >
           Clear selection
