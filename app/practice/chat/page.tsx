@@ -1,5 +1,4 @@
-import { ChatPanel } from "@/components/chat/ChatPanel";
-
 export default function ChatPage() {
-  return <ChatPanel />;
+  // The shared session shell owns the persistent chat instance.
+  return null;
 }

@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { ChatPanel } from "@/components/chat/ChatPanel";
 import { FaceCams } from "./FaceCams";
 import { SessionHeader } from "./SessionHeader";
 import { SessionToolbar } from "./SessionToolbar";
 import { RoomStateProvider } from "./RoomState";
 
-const DARK_RAIL_ROUTES = new Set([
+const ACTIVITY_ROUTES = new Set([
   "/practice/feelings",
   "/practice/whiteboard",
   "/practice/chess",
@@ -16,7 +17,22 @@ const DARK_RAIL_ROUTES = new Set([
 export function SessionShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const darkRail = DARK_RAIL_ROUTES.has(pathname);
+  const activityPage = ACTIVITY_ROUTES.has(pathname);
+  const chatPage = pathname === "/practice/chat";
+  const sideChatPage = pathname === "/practice" || activityPage;
+  const [expandedChatPath, setExpandedChatPath] = useState<string | null>(null);
+  const mobileChatExpanded = sideChatPage && expandedChatPath === pathname;
+  const chatTabRef = useRef<HTMLButtonElement>(null);
+  const closeChatRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    setExpandedChatPath(null);
+  }, [pathname]);
+
+  function closeMobileChat() {
+    setExpandedChatPath(null);
+    requestAnimationFrame(() => chatTabRef.current?.focus());
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -43,17 +59,64 @@ export function SessionShell({ children }: { children: React.ReactNode }) {
       .catch(() => {});
     void import("@/components/activities/ChessBoard").catch(() => {});
     void import("@/components/activities/FeelingsCheckIn").catch(() => {});
-    void import("@/components/chat/ChatPanel").catch(() => {});
     return () => controller.abort();
   }, [router]);
+
+  const activityPaneClassName = chatPage
+    ? "hidden"
+    : "session-activity-pane min-w-0 flex-1 overflow-hidden";
+  const chatSidebarClassName = chatPage
+    ? "min-h-0 min-w-0 flex-1"
+    : sideChatPage
+      ? `session-chat-sidebar min-h-0 min-w-0 border-l border-charcoal/10 ${mobileChatExpanded ? "mobile-chat-open" : ""}`
+      : "hidden";
+  const chatTabClassName = sideChatPage ? "session-chat-tab" : "hidden";
 
   return (
     <RoomStateProvider>
       <div className="relative flex h-dvh flex-col overflow-hidden bg-cream">
         <SessionHeader />
-        <div className="flex min-h-0 flex-1">
-          <FaceCams darkRail={darkRail} />
-          <main className="min-w-0 flex-1 overflow-hidden">{children}</main>
+        <div className="session-room-body relative flex min-h-0 flex-1">
+          <FaceCams darkRail={activityPage} />
+          <main className={activityPaneClassName}>{children}</main>
+          <aside
+            className={chatSidebarClassName}
+            aria-label="Session chat"
+            onKeyDown={(event) => {
+              if (mobileChatExpanded && event.key === "Escape") {
+                closeMobileChat();
+              }
+            }}
+          >
+            <button
+              ref={chatTabRef}
+              type="button"
+              className={chatTabClassName}
+              aria-label="Open session chat"
+              aria-controls="session-chat-content"
+              aria-expanded={mobileChatExpanded}
+              onClick={() => {
+                setExpandedChatPath(pathname);
+                requestAnimationFrame(() => closeChatRef.current?.focus());
+              }}
+            >
+              Chat
+            </button>
+            <div id="session-chat-content" className="session-chat-content">
+              <div className="session-chat-mobile-header">
+                <span>Session chat</span>
+                <button
+                  ref={closeChatRef}
+                  type="button"
+                  onClick={closeMobileChat}
+                  aria-label="Close session chat"
+                >
+                  Close
+                </button>
+              </div>
+              <ChatPanel compact={sideChatPage} />
+            </div>
+          </aside>
         </div>
         <SessionToolbar />
       </div>

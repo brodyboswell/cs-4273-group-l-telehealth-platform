@@ -25,6 +25,8 @@ export function SessionHeader() {
         {title.back ? (
           <Link
             href="/practice"
+            aria-label={`Return to welcome room from ${title.label}`}
+            title="Return to welcome room"
             className="truncate text-base font-medium text-charcoal hover:opacity-70"
           >
             ← {title.label}
