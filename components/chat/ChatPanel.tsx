@@ -26,6 +26,7 @@ function loadSessionId(): string {
   try {
     const saved = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
     if (isValidSessionId(saved)) return saved;
+
     const created = newSessionId();
     window.sessionStorage.setItem(SESSION_STORAGE_KEY, created);
     return created;
@@ -49,7 +50,7 @@ function formatTime(iso: string) {
   });
 }
 
-export function ChatPanel() {
+export function ChatPanel({ compact = false }: { compact?: boolean }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [clientName, setClientName] = useState("Alex");
@@ -57,6 +58,7 @@ export function ChatPanel() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const transcriptRequest = useRef<AbortController | null>(null);
@@ -69,22 +71,28 @@ export function ChatPanel() {
       const controller = new AbortController();
       transcriptRequest.current = controller;
       activeSession.current = id;
+
       setLoading(true);
       setError(null);
+
       try {
         const res = await fetch(`/api/transcripts/${encodeURIComponent(id)}`, {
           cache: "no-store",
           signal: controller.signal,
         });
+
         const data: unknown = await res.json();
+
         if (!res.ok)
           throw new Error(
             isRecord(data) && typeof data.error === "string"
               ? data.error
               : "Could not load the session.",
           );
+
         if (!isTranscript(data) || data.sessionId !== id)
           throw new Error("The session returned an invalid transcript.");
+
         if (controller.signal.aborted) return null;
         setEntries(data.entries);
         setClientName(data.personaName);
@@ -106,6 +114,7 @@ export function ChatPanel() {
     const id = loadSessionId();
     setSessionId(id);
     void loadTranscript(id);
+
     return () => {
       activeSession.current = null;
       transcriptRequest.current?.abort();
@@ -122,11 +131,14 @@ export function ChatPanel() {
   async function send() {
     const text = draft.trim();
     if (!text || !sessionId || loading || sendInFlight.current) return;
+
     sendInFlight.current = true;
     const lastSeq = entries.at(-1)?.seq ?? 0;
+
     setSending(true);
     setError(null);
     setDraft("");
+
     // Show the learner's message right away; the server response replaces it.
     const optimistic: TranscriptEntry = {
       seq: -1,
@@ -145,8 +157,11 @@ export function ChatPanel() {
           message: text,
         } satisfies ChatRequestBody),
       });
+
       const data: unknown = await res.json().catch(() => null);
+
       if (activeSession.current !== sessionId) return;
+
       if (!res.ok) {
         // The server keeps the learner message in the transcript even on failure.
         await loadTranscript(sessionId);
@@ -158,25 +173,32 @@ export function ChatPanel() {
           );
         return;
       }
+
       if (
         !isRecord(data) ||
         !isTranscript(data.transcript) ||
         data.transcript.sessionId !== sessionId
       )
         throw new Error("Invalid chat response");
+
       setEntries(data.transcript.entries);
     } catch {
       if (activeSession.current !== sessionId) return;
+
       // A lost response does not mean the server failed to record the message.
       const transcript = await loadTranscript(sessionId);
+
       if (activeSession.current !== sessionId) return;
+
       const recorded = transcript?.entries.some(
         (entry) =>
           entry.seq > lastSeq &&
           entry.speaker === "learner" &&
           entry.text === text,
       );
+
       if (transcript && !recorded) setDraft((current) => current || text);
+
       setError(
         recorded
           ? "Your message was recorded, but the reply could not be confirmed."
@@ -184,6 +206,7 @@ export function ChatPanel() {
       );
     } finally {
       sendInFlight.current = false;
+
       if (activeSession.current === sessionId) {
         setSending(false);
         inputRef.current?.focus();
@@ -200,13 +223,43 @@ export function ChatPanel() {
   }
 
   const visible = entries.filter((e) => e.speaker !== "system");
+
   const transcriptUrl = sessionId
     ? `/api/transcripts/${encodeURIComponent(sessionId)}`
     : "#";
 
+  const sessionActions = (
+    <>
+      <a
+        href={`${transcriptUrl}?format=txt&download=1`}
+        className="rounded-panel border border-charcoal/20 px-3 py-1.5 text-charcoal hover:bg-cream"
+      >
+        Transcript (.txt)
+      </a>
+
+      <a
+        href={`${transcriptUrl}?download=1`}
+        className="rounded-panel border border-charcoal/20 px-3 py-1.5 text-charcoal hover:bg-cream"
+      >
+        JSON
+      </a>
+
+      <button
+        type="button"
+        onClick={startNewSession}
+        disabled={sending}
+        className="rounded-panel px-3 py-1.5 text-charcoal/70 hover:bg-cream disabled:opacity-40"
+      >
+        New session
+      </button>
+    </>
+  );
+
   return (
-    <div className="flex h-full flex-col bg-cream">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-charcoal/10 bg-white px-6 py-3">
+    <div className="session-chat-panel flex h-full flex-col bg-cream">
+      <div
+        className={`flex shrink-0 items-center justify-between gap-2 border-b border-charcoal/10 bg-white py-3 ${compact ? "px-4" : "flex-wrap px-6"}`}
+      >
         <div className="min-w-0">
           <p className="text-sm font-semibold text-charcoal">
             Session with {clientName}
@@ -218,33 +271,24 @@ export function ChatPanel() {
             Every message is recorded in the session transcript
           </p>
         </div>
-        <div className="flex items-center gap-2 text-sm">
-          <a
-            href={`${transcriptUrl}?format=txt&download=1`}
-            className="rounded-panel border border-charcoal/20 px-3 py-1.5 text-charcoal hover:bg-cream"
-          >
-            Transcript (.txt)
-          </a>
-          <a
-            href={`${transcriptUrl}?download=1`}
-            className="rounded-panel border border-charcoal/20 px-3 py-1.5 text-charcoal hover:bg-cream"
-          >
-            JSON
-          </a>
-          <button
-            type="button"
-            onClick={startNewSession}
-            disabled={sending}
-            className="rounded-panel px-3 py-1.5 text-charcoal/70 hover:bg-cream disabled:opacity-40"
-          >
-            New session
-          </button>
-        </div>
+
+        {compact ? (
+          <details className="relative shrink-0 text-sm">
+            <summary className="cursor-pointer rounded-panel border border-charcoal/20 px-3 py-1.5 text-charcoal hover:bg-cream">
+              Options
+            </summary>
+            <div className="absolute right-0 z-20 mt-2 flex w-48 flex-col gap-1 rounded-panel border border-charcoal/15 bg-white p-2 shadow-md">
+              {sessionActions}
+            </div>
+          </details>
+        ) : (
+          <div className="flex items-center gap-2 text-sm">{sessionActions}</div>
+        )}
       </div>
 
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto px-6 py-5"
+        className={`min-h-0 flex-1 overflow-y-auto py-5 ${compact ? "px-4" : "px-6"}`}
         aria-live="polite"
       >
         <div className="mx-auto flex max-w-2xl flex-col gap-3">
@@ -253,28 +297,32 @@ export function ChatPanel() {
               Connecting to the session…
             </p>
           )}
+
           {visible.map((e, i) => {
             const mine = e.speaker === "learner";
+
             return (
               <div
                 key={`${e.seq}-${i}`}
                 className={`flex flex-col ${mine ? "items-end" : "items-start"}`}
               >
                 <div
-                  className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm leading-relaxed ${
+                  className={`whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm leading-relaxed ${
                     mine
                       ? "rounded-br-sm bg-sage text-white"
                       : "rounded-bl-sm border border-charcoal/10 bg-white text-charcoal"
-                  }`}
+                  } ${compact ? "max-w-[92%]" : "max-w-[80%]"}`}
                 >
                   {e.text}
                 </div>
+
                 <span className="mt-1 px-1 text-[11px] text-charcoal/45">
                   {mine ? "You" : clientName} · {formatTime(e.timestamp)}
                 </span>
               </div>
             );
           })}
+
           {sending && (
             <div className="flex items-start">
               <div className="rounded-2xl rounded-bl-sm border border-charcoal/10 bg-white px-4 py-2 text-sm italic text-charcoal/50">
@@ -285,7 +333,9 @@ export function ChatPanel() {
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-charcoal/10 bg-white px-6 py-3">
+      <div
+        className={`shrink-0 border-t border-charcoal/10 bg-white py-3 ${compact ? "px-4" : "px-6"}`}
+      >
         <div className="mx-auto max-w-2xl">
           {error && (
             <p
@@ -295,6 +345,7 @@ export function ChatPanel() {
               {error}
             </p>
           )}
+
           <form
             className="flex items-end gap-2"
             onSubmit={(ev) => {
@@ -323,6 +374,7 @@ export function ChatPanel() {
               disabled={!sessionId || loading}
               className="min-h-[44px] flex-1 resize-none rounded-panel border border-charcoal/20 px-3 py-2 text-sm text-charcoal outline-none focus:border-sage focus:ring-1 focus:ring-sage disabled:bg-cream"
             />
+
             <button
               type="submit"
               disabled={!draft.trim() || loading || sending || !sessionId}

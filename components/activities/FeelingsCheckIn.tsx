@@ -15,8 +15,10 @@ const FACE_DETAILS: Record<
   MoodId,
   {
     eyes?: string;
+    eyeY?: number;
     brows?: string;
     mouth: string;
+    filledMouth?: boolean;
   }
 > = {
   calm: {
@@ -25,11 +27,13 @@ const FACE_DETAILS: Record<
   },
   happy: {
     mouth: "M18 33 Q28 48 38 33 Z",
+    filledMouth: true,
   },
   excited: {
     eyes: "M16 24 Q20 15 24 24 M32 24 Q36 15 40 24",
     brows: "M16 15 L23 13 M33 13 L40 15",
     mouth: "M19 31 Q28 50 37 31 Z",
+    filledMouth: true,
   },
   proud: {
     eyes: "M16 24 Q20 19 24 24 M32 24 Q36 19 40 24",
@@ -57,6 +61,7 @@ const FACE_DETAILS: Record<
   tired: {
     eyes: "M16 26 L24 26 M32 26 L40 26",
     mouth: "M24 35 C24 30 32 30 32 35 C32 43 24 43 24 35 Z",
+    filledMouth: true,
   },
   lonely: {
     eyes: "M18 28 L22 28 M34 28 L38 28",
@@ -66,6 +71,7 @@ const FACE_DETAILS: Record<
   hopeful: {
     brows: "M16 16 Q20 12 24 16 M32 16 Q36 12 40 16",
     mouth: "M21 35 Q28 43 35 35",
+    eyeY: 22,
   },
   unsure: {
     brows: "M16 17 L24 17 M32 16 Q37 11 41 16",
@@ -109,12 +115,12 @@ function FeelingFace({ feeling }: { feeling: Feeling }) {
           <g fill="#293C35" stroke="none">
             <circle
               cx="20"
-              cy={feeling.label === "Hopeful" ? 22 : 24}
+              cy={feeling.eyeY ?? 24}
               r="2.5"
             />
             <circle
               cx="36"
-              cy={feeling.label === "Hopeful" ? 22 : 24}
+              cy={feeling.eyeY ?? 24}
               r="2.5"
             />
           </g>
@@ -122,13 +128,7 @@ function FeelingFace({ feeling }: { feeling: Feeling }) {
         {"brows" in feeling && <path d={feeling.brows} />}
         <path
           d={feeling.mouth}
-          fill={
-            feeling.label === "Happy" ||
-            feeling.label === "Excited" ||
-            feeling.label === "Tired"
-              ? "#293C35"
-              : "none"
-          }
+          fill={feeling.filledMouth ? "#293C35" : "none"}
         />
       </g>
     </svg>
@@ -221,7 +221,7 @@ export function FeelingsCheckIn() {
         )}
         <div className="relative mt-6 pb-16">
           <div
-            className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4"
+            className="feelings-grid grid gap-3 sm:gap-4"
             role="group"
             aria-label="Feelings"
             aria-describedby="feelings-instructions"

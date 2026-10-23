@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { signOut } from "@/lib/auth/mockAuth";
@@ -15,12 +15,16 @@ function ToolbarLink({
   icon: ReactNode;
   label: string;
 }) {
+  const pathname = usePathname();
+  const isCurrentPage = pathname === href;
+
   return (
     <Link
       href={href}
       aria-label={label}
+      aria-current={isCurrentPage ? "page" : undefined}
       title={label}
-      className="flex shrink-0 items-center gap-2 px-2 py-1 text-sm text-charcoal hover:opacity-70"
+      className={`flex shrink-0 items-center gap-2 px-2 py-1 text-sm text-charcoal hover:opacity-70 ${isCurrentPage ? "font-semibold" : ""}`}
     >
       {icon}
       <span className="hidden sm:inline">{label}</span>

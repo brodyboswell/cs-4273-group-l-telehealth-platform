@@ -1,5 +1,5 @@
 # AGENTS.md
-> Last updated: 2026-09-21 | Session: 1
+> Last updated: 2026-10-21
 
 ## Project Overview
 
@@ -31,12 +31,13 @@ The repository also contains the original cross-stack unit-test exercises under 
 ## Architecture
 
 **High-level design:**
-The current app is a Next.js 15 App Router prototype using React 19 and Tailwind CSS. The practice room is composed from shared session chrome and activity-specific components. The whiteboard is currently a visual placeholder and is being replaced with a client-only Excalidraw editor. Future collaboration and audit persistence should remain separate from the canvas renderer so whiteboard actions can be associated with a telehealth session log.
+The current app is a Next.js 15 App Router prototype using React 19 and Tailwind CSS. The shared practice shell owns one persistent chat panel. The welcome room and activity routes render beside chat on larger screens; chat expands from a right-edge tab on narrow screens. The whiteboard uses a client-only Excalidraw editor. Future collaboration and audit persistence should remain separate from the canvas renderer so whiteboard actions can be associated with a telehealth session log.
 
 ```
-[Practice room] -> [Activity route] -> [Whiteboard client editor]
-                                      -> [Future session operation log]
-                                      -> [Future collaboration service]
+[Practice room shell] -> [Activity route] -> [Whiteboard client editor]
+                      -> [Persistent chat] -> [Transcript API]
+                      -> [Future session operation log]
+                      -> [Future collaboration service]
 ```
 
 **Directory structure:**
@@ -44,6 +45,7 @@ The current app is a Next.js 15 App Router prototype using React 19 and Tailwind
 app/                         # Next.js routes and layouts
 app/practice/whiteboard/     # Whiteboard activity route
 components/activities/       # Activity-specific UI
+components/chat/             # Persistent conversation panel
 components/session/          # Shared session shell, header, cameras, toolbar
 docs/                        # Architecture and UI prototype references
 unit-tests/                  # Cross-stack unit-test exercises
@@ -111,6 +113,21 @@ public/                      # Static images and avatars
 ## Decisions & Gotchas Log
 
 *Append-only. Add new entries at the top.*
+
+---
+
+**2026-10-21 — Show persistent chat in the welcome room**
+Context: The shared chat remained mounted but was hidden on `/practice`, leaving the main room without the conversation.
+Decision: Use the same side chat layout for `/practice` as for activity routes, while keeping the welcome room's warm camera rail. The narrow-screen Chat tab applies there too.
+Rationale: The therapist can begin and continue a conversation in the main room, then open an activity without losing the draft or chat state.
+
+---
+
+**2026-10-21 — Keep chat beside practice activities**
+Context: Chat and the feelings, chess, and whiteboard activities were separate routes; navigating to an activity removed the conversation from view and remounted chat when returning.
+Decision: Mount one `ChatPanel` in `SessionShell`. Show it full width on `/practice/chat` and in a right column on activity routes. At widths up to 700px, keep a right-edge Chat tab that expands the panel over the activity. Adapt the feelings grid to the activity pane width, and keep transcript downloads and New session in a compact Options menu.
+Rationale: The learner can continue the same conversation while using an activity, and draft text and in-flight chat state survive route changes without duplicating the panel.
+Gotcha: This is a layout and navigation change. Activity requests and structured client tool actions still need the session-operation adapter before they can be replayed or graded.
 
 ---
 
