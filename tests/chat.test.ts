@@ -11,6 +11,7 @@ import {
   generateClientReply,
   LlmError,
   resolveProvider,
+  type LlmToolDefinition,
 } from "../lib/chat/llm";
 import {
   appendEntry,
@@ -202,6 +203,69 @@ describe("chat HTTP endpoints", () => {
     assert.match(await download.text(), /Learner: Hi Alex/);
   });
 
+  it("passes feelings context to the mock, records its action, and deduplicates notices", async () => {
+    const sessionId = "feelings-agent-session";
+    const activity = {
+      activityId: "feelings",
+      state: { selectedMoodId: null },
+    };
+    const first = await post({ sessionId, message: "I'm not sure.", activity });
+    assert.equal(first.status, 200);
+    const firstData = await first.json();
+    assert.deepEqual(firstData.learnerEntry.activity, activity);
+    assert.equal(firstData.reply.actions.length, 1);
+    assert.deepEqual(firstData.reply.actions[0], {
+      activityId: "feelings",
+      tool: "select_mood",
+      input: {
+        type: "select_mood",
+        moodId: "worried",
+        rationale:
+          "I'm feeling worried because something has been weighing on me today.",
+      },
+    });
+    assert.equal(
+      firstData.transcript.entries.filter((entry: { activityNotice?: unknown }) =>
+        entry.activityNotice,
+      ).length,
+      1,
+    );
+
+    const repeated = await post({ sessionId, message: "Why worried?", activity });
+    const repeatedData = await repeated.json();
+    assert.equal(
+      repeatedData.transcript.entries.filter(
+        (entry: { activityNotice?: unknown }) => entry.activityNotice,
+      ).length,
+      1,
+    );
+
+    await post({ sessionId, message: "Back in the room." });
+    const returned = await post({ sessionId, message: "Back to feelings.", activity });
+    const returnedData = await returned.json();
+    assert.equal(
+      returnedData.transcript.entries.filter(
+        (entry: { activityNotice?: unknown }) => entry.activityNotice,
+      ).length,
+      2,
+    );
+  });
+
+  it("rejects unknown or invalid activity snapshots before recording a message", async () => {
+    for (const activity of [
+      { activityId: "unknown", state: {} },
+      { activityId: "feelings", state: { selectedMoodId: "invented" } },
+    ]) {
+      const response = await post({
+        sessionId: "bad-activity-session",
+        message: "Hi",
+        activity,
+      });
+      assert.equal(response.status, 400);
+    }
+    assert.equal(await readTranscript("bad-activity-session"), null);
+  });
+
   it("returns consistent JSON errors when transcript storage cannot be accessed", async (context) => {
     context.mock.method(console, "error", () => undefined);
     const blocked = path.join(directory, "not-a-directory");
@@ -225,6 +289,16 @@ describe("chat HTTP endpoints", () => {
 });
 
 describe("provider responses", () => {
+  const moodTool: LlmToolDefinition = {
+    name: "select_mood",
+    description: "Select a mood.",
+    inputSchema: {
+      type: "object",
+      properties: { moodId: { type: "string" } },
+      required: ["moodId"],
+    },
+  };
+
   it("chooses an explicit provider before keys and rejects unsupported providers", () => {
     assert.equal(
       resolveProvider({ LLM_PROVIDER: "mock", OPENAI_API_KEY: "test" }),
@@ -281,6 +355,121 @@ describe("provider responses", () => {
         OPENAI_API_KEY: "test-key",
       }),
       /invalid reply/,
+    );
+  });
+
+  it("sends Anthropic tool schemas and parses tool_use blocks", async (context) => {
+    let requestBody: unknown;
+    context.mock.method(
+      globalThis,
+      "fetch",
+      async (
+        _input: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1],
+      ) => {
+        requestBody = JSON.parse(String(init?.body));
+        return Response.json({
+          model: "test-model",
+          content: [
+            { type: "tool_use", name: "select_mood", input: { moodId: "sad" } },
+          ],
+        });
+      },
+    );
+
+    const reply = await generateClientReply(
+      "scenario",
+      [],
+      { LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "test-key" },
+      [moodTool],
+    );
+
+    assert.equal(reply.text, "");
+    assert.deepEqual(reply.toolCalls, [
+      { name: "select_mood", input: { moodId: "sad" } },
+    ]);
+    assert.deepEqual(
+      (requestBody as { tools: Array<{ input_schema: unknown }> }).tools[0]
+        .input_schema,
+      moodTool.inputSchema,
+    );
+  });
+
+  it("sends OpenAI function tools and parses tool_calls", async (context) => {
+    let requestBody: unknown;
+    context.mock.method(
+      globalThis,
+      "fetch",
+      async (
+        _input: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1],
+      ) => {
+        requestBody = JSON.parse(String(init?.body));
+        return Response.json({
+          model: "test-model",
+          choices: [
+            {
+              message: {
+                content: null,
+                tool_calls: [
+                  {
+                    function: {
+                      name: "select_mood",
+                      arguments: '{"moodId":"sad"}',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        });
+      },
+    );
+
+    const reply = await generateClientReply(
+      "scenario",
+      [],
+      { LLM_PROVIDER: "openai", OPENAI_API_KEY: "test-key" },
+      [moodTool],
+    );
+
+    assert.equal(reply.text, "");
+    assert.deepEqual(reply.toolCalls, [
+      { name: "select_mood", input: { moodId: "sad" } },
+    ]);
+    assert.deepEqual(
+      (requestBody as { tools: Array<{ function: { parameters: unknown } }> })
+        .tools[0].function.parameters,
+      moodTool.inputSchema,
+    );
+  });
+
+  it("rejects malformed OpenAI tool arguments", async (context) => {
+    context.mock.method(globalThis, "fetch", async () =>
+      Response.json({
+        choices: [
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  function: { name: "select_mood", arguments: "{broken" },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+
+    await assert.rejects(
+      generateClientReply(
+        "scenario",
+        [],
+        { LLM_PROVIDER: "openai", OPENAI_API_KEY: "test-key" },
+        [moodTool],
+      ),
+      /invalid tool arguments/,
     );
   });
 });

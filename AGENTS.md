@@ -1,5 +1,5 @@
 # AGENTS.md
-> Last updated: 2026-10-21
+> Last updated: 2026-10-22
 
 ## Project Overview
 
@@ -31,11 +31,12 @@ The repository also contains the original cross-stack unit-test exercises under 
 ## Architecture
 
 **High-level design:**
-The current app is a Next.js 15 App Router prototype using React 19 and Tailwind CSS. The shared practice shell owns one persistent chat panel. The welcome room and activity routes render beside chat on larger screens; chat expands from a right-edge tab on narrow screens. The whiteboard uses a client-only Excalidraw editor. Future collaboration and audit persistence should remain separate from the canvas renderer so whiteboard actions can be associated with a telehealth session log.
+The current app is a Next.js 15 App Router prototype using React 19 and Tailwind CSS. The shared practice shell owns one persistent chat panel and an activity bridge. The active activity registers a validated state snapshot and provider-neutral tool definitions; the server registry adds activity context to the LLM request, validates returned actions, and stores them in the transcript. The welcome room and activity routes render beside chat on larger screens; chat expands from a right-edge tab on narrow screens. The whiteboard uses a client-only Excalidraw editor. Future collaboration and audit persistence should remain separate from the canvas renderer so whiteboard actions can be associated with a telehealth session log.
 
 ```
 [Practice room shell] -> [Activity route] -> [Whiteboard client editor]
-                      -> [Persistent chat] -> [Transcript API]
+                      -> [Activity bridge] -> [Server activity registry]
+                      -> [Persistent chat] -> [Transcript API + LLM tools]
                       -> [Future session operation log]
                       -> [Future collaboration service]
 ```
@@ -47,6 +48,7 @@ app/practice/whiteboard/     # Whiteboard activity route
 components/activities/       # Activity-specific UI
 components/chat/             # Persistent conversation panel
 components/session/          # Shared session shell, header, cameras, toolbar
+lib/activities/              # Activity definitions, validation, tools, and registry
 docs/                        # Architecture and UI prototype references
 unit-tests/                  # Cross-stack unit-test exercises
 public/                      # Static images and avatars
@@ -100,6 +102,8 @@ public/                      # Static images and avatars
 **Key domain constraints:**
 - Preserve the existing visual session shell and activity navigation.
 - Treat whiteboard actions as session data that will eventually need ordering, attribution, replay, and rubric evaluation.
+- Keep activity-specific state parsers, context descriptions, tool schemas, and action parsers in activity definitions; do not add activity-specific branches to provider adapters.
+- Validate activity snapshots and tool inputs on the server. Record tool actions and rejected calls in the session transcript before applying accepted actions in the browser.
 - Do not claim HIPAA compliance from the UI implementation alone; avoid sending sensitive data to unreviewed third-party services.
 - Keep the renderer replaceable by separating canvas state from future collaboration/audit operations.
 
@@ -113,6 +117,14 @@ public/                      # Static images and avatars
 ## Decisions & Gotchas Log
 
 *Append-only. Add new entries at the top.*
+
+---
+
+**2026-10-22 — Pass active activity context and actions through shared chat**
+Context: The virtual client needs to understand the activity beside chat and interact with it while keeping every action auditable.
+Decision: Each activity registers its stable ID, serializable state, and action handler through `ActivityBridge`. A server-side activity registry validates the snapshot, generates activity context, and provides only that activity's tools to the provider. Provider tool calls are parsed into a shared format, validated by the activity definition, recorded in the transcript, and dispatched only to the activity instance that was active when the learner sent the message. A logged client-facing notice explains when tools become available.
+Rationale: Adding an activity requires an activity definition and handler, without adding provider-specific activity logic to chat.
+Gotcha: The feelings chart is the first registered activity. Chess and whiteboard tools still need definitions and their own interaction tests; file-based transcripts and unauthenticated endpoints retain their existing prototype limits.
 
 ---
 
@@ -221,6 +233,7 @@ Rationale: The whiteboard should feel like an activity inside the telehealth pra
 
 - [ ] Replace the deterministic chess move mock with an LLM-backed strategy.
 - [ ] Add ordered chess move and client-line entries to the session log.
+- [ ] Register chess and whiteboard interactions through the activity tool bridge.
 - [x] Install `@excalidraw/excalidraw`.
 - [x] Add a client-only Excalidraw wrapper compatible with Next.js SSR.
 - [x] Replace the static whiteboard placeholder while preserving the session layout.

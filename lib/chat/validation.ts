@@ -1,4 +1,5 @@
 import type { Transcript } from "./types";
+import type { ActivityAction, ActivitySnapshot } from "@/lib/activities/types";
 
 /** Shared browser/server input rules; keep this module free of server imports. */
 export const MAX_MESSAGE_LENGTH = 2000;
@@ -14,6 +15,25 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isTimestamp(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
+function isActivitySnapshot(value: unknown): value is ActivitySnapshot {
+  return (
+    isRecord(value) &&
+    typeof value.activityId === "string" &&
+    "state" in value
+  );
+}
+
+function isActivityAction(value: unknown): value is ActivityAction {
+  return (
+    isRecord(value) &&
+    typeof value.activityId === "string" &&
+    value.activityId.length > 0 &&
+    typeof value.tool === "string" &&
+    value.tool.length > 0 &&
+    isRecord(value.input)
+  );
 }
 
 /** Reject corrupt logs rather than rewriting them or sending malformed data to a provider. */
@@ -41,6 +61,22 @@ export function isTranscript(value: unknown): value is Transcript {
       (entry.latencyMs === undefined ||
         (typeof entry.latencyMs === "number" &&
           Number.isFinite(entry.latencyMs) &&
-          entry.latencyMs >= 0)),
+          entry.latencyMs >= 0)) &&
+      (entry.activity === undefined ||
+        entry.activity === null ||
+        isActivitySnapshot(entry.activity)) &&
+      (entry.actions === undefined ||
+        (Array.isArray(entry.actions) && entry.actions.every(isActivityAction))) &&
+      (entry.activityNotice === undefined ||
+        isActivityAvailabilityNotice(entry.activityNotice)),
+  );
+}
+
+function isActivityAvailabilityNotice(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.activityId === "string" &&
+    Array.isArray(value.toolNames) &&
+    value.toolNames.every((name) => typeof name === "string")
   );
 }
