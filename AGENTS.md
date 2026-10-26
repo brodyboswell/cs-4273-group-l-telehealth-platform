@@ -118,6 +118,13 @@ public/                      # Static images and avatars
 
 *Append-only. Add new entries at the top.*
 
+**2026-10-26 — Keep tool-only feelings responses visible and actionable**
+Context: A provider can return a valid `select_mood` call without separate assistant text; requiring text before storing the action caused a 502 and prevented the feelings chart from updating.
+Decision: When a validated activity action has no provider text, use its client-facing `commentary` or `rationale` field for the virtual-client transcript line.
+Rationale: Tool-only responses remain auditable and dispatchable while the client still has a visible line in chat.
+
+---
+
 **2026-10-26 — Route chess turns through validated activity tools**
 Context: Chess used a local random-move mock while the feelings chart was the only activity connected to the shared client tool flow.
 Decision: Register chess as an activity with `play_chess_move`; reconstruct its position from legal move history and verify the FEN on the server; expose only the current legal move IDs; and request client turns through the shared chat bridge. Record nonverbal board events separately from learner speech, require one legal move on client turns, and use a minimum 400 ms visible think delay. The offline mock chooses the first legal option.
@@ -130,7 +137,7 @@ Gotcha: Each board turn carries a game ID and turn epoch for idempotency and sta
 Context: The virtual client needs to understand the activity beside chat and interact with it while keeping every action auditable.
 Decision: Each activity registers its stable ID, serializable state, and action handler through `ActivityBridge`. A server-side activity registry validates the snapshot, generates activity context, and provides only that activity's tools to the provider. Provider tool calls are parsed into a shared format, validated by the activity definition, recorded in the transcript, and dispatched only to the activity instance that was active when the learner sent the message. A logged client-facing notice explains when tools become available.
 Rationale: Adding an activity requires an activity definition and handler, without adding provider-specific activity logic to chat.
-Gotcha: The feelings chart is the first registered activity. Chess and whiteboard tools still need definitions and their own interaction tests; file-based transcripts and unauthenticated endpoints retain their existing prototype limits.
+Gotcha: The whiteboard still needs its own tool definition and interaction tests; file-based transcripts and unauthenticated endpoints retain their existing prototype limits.
 
 ---
 

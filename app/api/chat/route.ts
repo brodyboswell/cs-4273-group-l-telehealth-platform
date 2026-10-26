@@ -243,7 +243,7 @@ export async function POST(request: Request) {
             actions.length !== 1 ||
             actions[0]?.tool !== requiredToolName)
         ) {
-          const fallbackText = reply.text.trim() || actionCommentary(actions);
+          const fallbackText = reply.text.trim() || actionClientText(actions);
           if (fallbackText) {
             await appendEntry(transcript, "virtual_client", fallbackText, {
               model: reply.model,
@@ -258,7 +258,7 @@ export async function POST(request: Request) {
           return { ok: false as const, status: 502, msg };
         }
 
-        const replyText = reply.text.trim() || actionCommentary(actions);
+        const replyText = reply.text.trim() || actionClientText(actions);
         if (!replyText) throw new LlmError("The virtual client returned an empty reply.");
 
         const replyEntry = await appendEntry(
@@ -356,14 +356,13 @@ async function ensureAvailabilityNotice(
   }
 }
 
-function actionCommentary(actions: ActivityAction[]): string {
+function actionClientText(actions: ActivityAction[]): string {
   for (const action of actions) {
-    if (
-      isRecord(action.input) &&
-      typeof action.input.commentary === "string" &&
-      action.input.commentary.trim()
-    )
-      return action.input.commentary.trim();
+    if (!isRecord(action.input)) continue;
+    for (const field of ["commentary", "rationale"] as const) {
+      const text = action.input[field];
+      if (typeof text === "string" && text.trim()) return text.trim();
+    }
   }
   return "";
 }

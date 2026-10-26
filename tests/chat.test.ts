@@ -252,6 +252,72 @@ describe("chat HTTP endpoints", () => {
     );
   });
 
+  it("uses a validated feelings rationale when the provider returns only a tool call", async (context) => {
+    const previousProvider = process.env.LLM_PROVIDER;
+    const previousOpenAiKey = process.env.OPENAI_API_KEY;
+    context.mock.method(console, "error", () => undefined);
+    context.mock.method(globalThis, "fetch", async () =>
+      Response.json({
+        model: "test-model",
+        choices: [
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  type: "function",
+                  function: {
+                    name: "select_mood",
+                    arguments: JSON.stringify({
+                      moodId: "worried",
+                      rationale: "I feel worried because a lot is on my mind.",
+                    }),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+
+    try {
+      process.env.LLM_PROVIDER = "openai";
+      process.env.OPENAI_API_KEY = "test-key";
+      const response = await post({
+        sessionId: "feelings-tool-only",
+        message: "Can you show how you are feeling?",
+        activity: {
+          activityId: "feelings",
+          state: { selectedMoodId: null },
+        },
+      });
+
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.equal(
+        data.reply.text,
+        "I feel worried because a lot is on my mind.",
+      );
+      assert.deepEqual(data.reply.actions, [
+        {
+          activityId: "feelings",
+          tool: "select_mood",
+          input: {
+            type: "select_mood",
+            moodId: "worried",
+            rationale: "I feel worried because a lot is on my mind.",
+          },
+        },
+      ]);
+    } finally {
+      if (previousProvider === undefined) delete process.env.LLM_PROVIDER;
+      else process.env.LLM_PROVIDER = previousProvider;
+      if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previousOpenAiKey;
+    }
+  });
+
   it("runs an idempotent chess client turn and logs the learner move separately from speech", async () => {
     const game = new Chess();
     game.move({ from: "e2", to: "e4" });
