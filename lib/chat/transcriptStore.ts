@@ -112,7 +112,13 @@ function pushEntry(
   text: string,
   extra: Pick<
     TranscriptEntry,
-    "latencyMs" | "model" | "activity" | "actions" | "activityNotice"
+    | "latencyMs"
+    | "model"
+    | "activity"
+    | "actions"
+    | "activityNotice"
+    | "activityEvent"
+    | "activityTurnId"
   > = {},
 ): TranscriptEntry {
   const entry: TranscriptEntry = {
@@ -133,7 +139,13 @@ export async function appendEntry(
   text: string,
   extra: Pick<
     TranscriptEntry,
-    "latencyMs" | "model" | "activity" | "actions" | "activityNotice"
+    | "latencyMs"
+    | "model"
+    | "activity"
+    | "actions"
+    | "activityNotice"
+    | "activityEvent"
+    | "activityTurnId"
   > = {},
 ): Promise<TranscriptEntry> {
   const entry = pushEntry(t, speaker, text, extra);
@@ -153,7 +165,10 @@ export function toChatHistory(t: Transcript): ChatTurn[] {
   const turns: ChatTurn[] = [];
   for (const e of t.entries) {
     if (e.speaker === "system") continue;
-    const role = e.speaker === "learner" ? "user" : "assistant";
+    const role =
+      e.speaker === "learner" || e.speaker === "activity"
+        ? "user"
+        : "assistant";
     const last = turns[turns.length - 1];
     if (last && last.role === role) last.content += `\n\n${e.text}`;
     else turns.push({ role, content: e.text });
@@ -216,6 +231,7 @@ const SPEAKER_LABEL: Record<Speaker, (t: Transcript) => string> = {
   learner: () => "Learner",
   virtual_client: (t) => `${t.personaName} (virtual client)`,
   system: () => "System",
+  activity: () => "Activity event",
 };
 
 /** Human-readable plain-text transcript, e.g. for instructors or qualitative coding. */
@@ -240,6 +256,9 @@ export function formatTranscriptText(t: Transcript): string {
     ),
     ...(e.activityNotice
       ? [`  Available tools: ${e.activityNotice.toolNames.join(", ")}`]
+      : []),
+    ...(e.activityEvent
+      ? [`  Activity event (${e.activityEvent.activityId}.${e.activityEvent.type}): ${JSON.stringify(e.activityEvent.input)}`]
       : []),
   ]);
   return [...header, ...lines, ""].join("\n");

@@ -1,5 +1,5 @@
 # AGENTS.md
-> Last updated: 2026-10-22
+> Last updated: 2026-10-26
 
 ## Project Overview
 
@@ -118,6 +118,12 @@ public/                      # Static images and avatars
 
 *Append-only. Add new entries at the top.*
 
+**2026-10-26 — Route chess turns through validated activity tools**
+Context: Chess used a local random-move mock while the feelings chart was the only activity connected to the shared client tool flow.
+Decision: Register chess as an activity with `play_chess_move`; reconstruct its position from legal move history and verify the FEN on the server; expose only the current legal move IDs; and request client turns through the shared chat bridge. Record nonverbal board events separately from learner speech, require one legal move on client turns, and use a minimum 400 ms visible think delay. The offline mock chooses the first legal option.
+Rationale: Keeps provider adapters activity-neutral, makes every selected move auditable, and prevents stale or illegal actions from changing the board.
+Gotcha: Each board turn carries a game ID and turn epoch for idempotency and stale-action checks. This does not add authentication or durable shared storage.
+
 ---
 
 **2026-10-22 — Pass active activity context and actions through shared chat**
@@ -231,9 +237,10 @@ Rationale: The whiteboard should feel like an activity inside the telehealth pra
 
 ## Next Up
 
-- [ ] Replace the deterministic chess move mock with an LLM-backed strategy.
-- [ ] Add ordered chess move and client-line entries to the session log.
-- [ ] Register chess and whiteboard interactions through the activity tool bridge.
+- [x] Replace the local chess move mock with the shared LLM-backed activity tool.
+- [x] Add ordered chess activity events and client replies to the session transcript.
+- [x] Register chess interactions through the activity tool bridge.
+- [ ] Register whiteboard interactions through the activity tool bridge.
 - [x] Install `@excalidraw/excalidraw`.
 - [x] Add a client-only Excalidraw wrapper compatible with Next.js SSR.
 - [x] Replace the static whiteboard placeholder while preserving the session layout.

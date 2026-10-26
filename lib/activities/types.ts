@@ -36,7 +36,17 @@ export interface ActivityTool<Input = unknown> {
   /** Deterministic input used by the offline provider during development. */
   mockInput?: unknown;
   /** Validates provider output before the server records or dispatches it. */
-  parseInput(value: unknown): Input;
+  parseInput(value: unknown, state?: unknown): Input;
+}
+
+/** A validated, nonverbal event that starts an activity-driven client turn. */
+export interface ActivityTurnEvent {
+  activityId: string;
+  requestId: string;
+  actor: "learner" | "platform";
+  type: string;
+  text: string;
+  input: unknown;
 }
 
 /** Contract implemented once per activity and consumed by the shared chat flow. */
@@ -49,6 +59,16 @@ export interface ActivityDefinition<State = unknown> {
   /** Describes the validated state in concise, human-readable LLM context. */
   describeState(state: State): string;
   tools: readonly ActivityTool[];
+  /** Optionally shape the offered tools around the validated current state. */
+  getTools?(state: State): readonly ActivityTool[];
+  /** Force a tool when this state requires the virtual client to act. */
+  requiredToolName?(state: State): string | undefined;
+  /** Validates an activity event that asks the client to take its turn. */
+  parseTurnEvent?(
+    value: unknown,
+    requestId: string,
+    state: State,
+  ): ActivityTurnEvent;
 }
 
 /** Type-erased activity definition stored in a heterogeneous registry. */
@@ -58,6 +78,13 @@ export interface RegisteredActivity {
   parseState(value: unknown): unknown;
   describeState(state: unknown): string;
   tools: readonly ActivityTool[];
+  getTools?(state: unknown): readonly ActivityTool[];
+  requiredToolName?(state: unknown): string | undefined;
+  parseTurnEvent?(
+    value: unknown,
+    requestId: string,
+    state: unknown,
+  ): ActivityTurnEvent;
 }
 
 /** Preserves an activity's state type while adapting it for registry storage. */
@@ -70,6 +97,16 @@ export function defineActivity<State>(
     parseState: definition.parseState,
     describeState: (state) => definition.describeState(state as State),
     tools: definition.tools,
+    getTools: definition.getTools
+      ? (state) => definition.getTools!(state as State)
+      : undefined,
+    requiredToolName: definition.requiredToolName
+      ? (state) => definition.requiredToolName!(state as State)
+      : undefined,
+    parseTurnEvent: definition.parseTurnEvent
+      ? (value, requestId, state) =>
+          definition.parseTurnEvent!(value, requestId, state as State)
+      : undefined,
   };
 }
 

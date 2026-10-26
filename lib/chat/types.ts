@@ -10,9 +10,10 @@ import type {
   ActivityAvailabilityNotice,
   ActivityAction,
   ActivitySnapshot,
+  ActivityTurnEvent,
 } from "@/lib/activities/types";
 
-export type Speaker = "learner" | "virtual_client" | "system";
+export type Speaker = "learner" | "virtual_client" | "system" | "activity";
 
 export interface TranscriptEntry {
   /** 1-based position in the session; guarantees a stable order for replay and grading. */
@@ -31,6 +32,10 @@ export interface TranscriptEntry {
   actions?: ActivityAction[];
   /** Metadata for a platform-generated, client-visible activity notice. */
   activityNotice?: ActivityAvailabilityNotice;
+  /** Structured, nonverbal learner or platform activity event. */
+  activityEvent?: ActivityTurnEvent;
+  /** Idempotency key for the virtual-client reply to an activity turn. */
+  activityTurnId?: string;
 }
 
 export interface Transcript {
@@ -49,15 +54,34 @@ export interface ChatTurn {
 }
 
 /** Body of POST /api/chat */
-export interface ChatRequestBody {
+export interface ChatMessageRequestBody {
   sessionId: string;
   message: string;
   activity?: ActivitySnapshot;
 }
 
+export interface ActivityTurnRequestBody {
+  sessionId: string;
+  activityTurn: {
+    activity: ActivitySnapshot;
+    requestId: string;
+    event: unknown;
+  };
+}
+
+export type ChatRequestBody =
+  | ChatMessageRequestBody
+  | ActivityTurnRequestBody;
+
 /** Successful response of POST /api/chat */
 export interface ChatResponseBody {
   reply: TranscriptEntry;
   learnerEntry: TranscriptEntry;
+  transcript: Transcript;
+}
+
+export interface ActivityTurnResponseBody {
+  activityEvent: TranscriptEntry;
+  reply: TranscriptEntry;
   transcript: Transcript;
 }

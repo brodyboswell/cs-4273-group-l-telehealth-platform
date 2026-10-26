@@ -21,7 +21,9 @@ interface ActivityRegistration extends ActivityActionTarget {
 
 interface ActivityBridgeController {
   register(registration: ActivityRegistration): () => void;
+  registerTurnRequester(requester: ActivityTurnRequester): () => void;
   capture(): ActivityBridgeCapture;
+  requestTurn(request: ActivityTurnTrigger): Promise<void>;
 }
 
 export interface ActivityBridgeCapture {
@@ -31,12 +33,29 @@ export interface ActivityBridgeCapture {
 
 export interface ActivityBridge {
   capture(): ActivityBridgeCapture;
+  registerTurnRequester(requester: ActivityTurnRequester): () => void;
+  requestTurn(request: ActivityTurnTrigger): Promise<void>;
 }
+
+export interface ActivityTurnTrigger {
+  requestId: string;
+  event: unknown;
+}
+
+export interface ActivityTurnDispatchRequest extends ActivityTurnTrigger {
+  snapshot: ActivitySnapshot;
+  dispatch(actions: readonly ActivityAction[]): void;
+}
+
+export type ActivityTurnRequester = (
+  request: ActivityTurnDispatchRequest,
+) => Promise<void>;
 
 const ActivityBridgeContext = createContext<ActivityBridgeController | null>(null);
 
 export function ActivityBridgeProvider({ children }: { children: ReactNode }) {
   const active = useRef<ActivityRegistration | null>(null);
+  const turnRequester = useRef<ActivityTurnRequester | null>(null);
 
   const register = useCallback((registration: ActivityRegistration) => {
     active.current = registration;
@@ -57,7 +76,40 @@ export function ActivityBridgeProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const controller = useMemo(() => ({ register, capture }), [capture, register]);
+  const registerTurnRequester = useCallback(
+    (requester: ActivityTurnRequester) => {
+      turnRequester.current = requester;
+      return () => {
+        if (turnRequester.current === requester) turnRequester.current = null;
+      };
+    },
+    [],
+  );
+
+  const requestTurn = useCallback(async (request: ActivityTurnTrigger) => {
+    const registration = active.current;
+    const requester = turnRequester.current;
+    if (!registration)
+      throw new Error("There is no active activity for the client turn.");
+    if (!requester)
+      throw new Error("The session chat is not ready to request a client turn.");
+
+    await requester({
+      ...request,
+      snapshot: {
+        activityId: registration.activityId,
+        state: registration.state,
+      },
+      dispatch(actions) {
+        dispatchActivityActions(active.current, registration, actions);
+      },
+    });
+  }, []);
+
+  const controller = useMemo(
+    () => ({ register, registerTurnRequester, capture, requestTurn }),
+    [capture, register, registerTurnRequester, requestTurn],
+  );
 
   return (
     <ActivityBridgeContext.Provider value={controller}>
@@ -93,8 +145,12 @@ export function useActivityTools(
 }
 
 export function useActivityBridge(): ActivityBridge {
-  const { capture } = useActivityBridgeController();
-  return { capture };
+  const { capture, registerTurnRequester, requestTurn } =
+    useActivityBridgeController();
+  return useMemo(
+    () => ({ capture, registerTurnRequester, requestTurn }),
+    [capture, registerTurnRequester, requestTurn],
+  );
 }
 
 function useActivityBridgeController(): ActivityBridgeController {
