@@ -251,6 +251,129 @@ describe("chat HTTP endpoints", () => {
     );
   });
 
+  it("keeps the offline mock from drawing without a configured provider", async () => {
+    const response = await post({
+      sessionId: "whiteboard-offline-session",
+      message: "Hi, how was your day?",
+      activity: { activityId: "whiteboard", state: { hasContent: false } },
+    });
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.equal(data.reply.model, "mock:offline");
+    assert.deepEqual(data.reply.actions ?? [], []);
+    assert.deepEqual(
+      data.transcript.entries.find(
+        (entry: { activityNotice?: unknown }) => entry.activityNotice,
+      )?.activityNotice.toolNames,
+      ["replace_whiteboard_with_doodle"],
+    );
+  });
+
+  it("records valid doodles and audits rejected whiteboard tool calls", async (context) => {
+    const previousProvider = process.env.LLM_PROVIDER;
+    const previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
+    const doodle = {
+      strokes: [{ points: [{ x: 10, y: 20 }, { x: 70, y: 80 }] }],
+      caption: "The bus was late",
+    };
+    const providerReplies = [
+      {
+        model: "test-model",
+        content: [
+          { type: "text", text: "It was a really rough bus ride." },
+          {
+            type: "tool_use",
+            name: "replace_whiteboard_with_doodle",
+            input: doodle,
+          },
+        ],
+      },
+      {
+        model: "test-model",
+        content: [
+          {
+            type: "tool_use",
+            name: "replace_whiteboard_with_doodle",
+            input: {
+              strokes: [{ points: [{ x: -1, y: 20 }, { x: 70, y: 80 }] }],
+            },
+          },
+        ],
+      },
+    ];
+    let requestBody: Record<string, unknown> | undefined;
+
+    process.env.LLM_PROVIDER = "anthropic";
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    context.mock.method(
+      globalThis,
+      "fetch",
+      async (
+        _input: Parameters<typeof fetch>[0],
+        init?: Parameters<typeof fetch>[1],
+      ) => {
+        requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return Response.json(providerReplies.shift());
+      },
+    );
+
+    try {
+      const activity = {
+        activityId: "whiteboard",
+        state: { hasContent: true },
+      };
+      const accepted = await post({
+        sessionId: "whiteboard-tool-session",
+        message: "Can you draw what happened?",
+        activity,
+      });
+      assert.equal(accepted.status, 200);
+      const acceptedData = await accepted.json();
+      assert.deepEqual(acceptedData.reply.actions, [
+        {
+          activityId: "whiteboard",
+          tool: "replace_whiteboard_with_doodle",
+          input: doodle,
+        },
+      ]);
+      assert.deepEqual(acceptedData.transcript.entries.at(-1).actions, [
+        acceptedData.reply.actions[0],
+      ]);
+      const body = requestBody as {
+        system: string;
+        tools: Array<{ name: string }>;
+      };
+      assert.match(body.system, /directly asks/);
+      assert.match(body.system, /replaces the entire board/);
+      assert.deepEqual(
+        body.tools.map(({ name }) => name),
+        ["replace_whiteboard_with_doodle"],
+      );
+
+      const rejected = await post({
+        sessionId: "whiteboard-tool-session",
+        message: "Please draw that again.",
+        activity,
+      });
+      assert.equal(rejected.status, 200);
+      const rejectedData = await rejected.json();
+      assert.equal(rejectedData.reply.actions, undefined);
+      assert.ok(
+        rejectedData.transcript.entries.some(
+          (entry: { speaker: string; text: string }) =>
+            entry.speaker === "system" &&
+            entry.text.includes("Rejected activity tool call"),
+        ),
+      );
+    } finally {
+      if (previousProvider === undefined) delete process.env.LLM_PROVIDER;
+      else process.env.LLM_PROVIDER = previousProvider;
+      if (previousAnthropicKey === undefined)
+        delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = previousAnthropicKey;
+    }
+  });
+
   it("rejects unknown or invalid activity snapshots before recording a message", async () => {
     for (const activity of [
       { activityId: "unknown", state: {} },
