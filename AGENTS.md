@@ -1,5 +1,5 @@
 # AGENTS.md
-> Last updated: 2026-10-22
+> Last updated: 2026-10-26
 
 ## Project Overview
 
@@ -120,6 +120,14 @@ public/                      # Static images and avatars
 
 ---
 
+**2026-10-26 — Route invited client doodles through the whiteboard activity tool**
+Context: Learners may invite the virtual client to draw a simple situation on the Excalidraw whiteboard, and the action needs to remain reviewable in the session transcript.
+Decision: Add `replace_whiteboard_with_doodle` with bounded normalized freehand strokes and an optional short caption. Validate the payload in the server activity registry, record accepted and rejected calls through the existing transcript flow, and apply accepted doodles to Excalidraw as one undoable scene replacement. The activity context instructs the client to draw only after a direct learner invitation; the offline mock does not produce doodles.
+Rationale: Keeps provider adapters activity-neutral, avoids passing raw Excalidraw data or images through the model, and lets the learner undo the replacement.
+Gotcha: The transcript stores the validated client doodle action, while learner-created board content and the complete canvas scene are not persisted or synchronized between participants.
+
+---
+
 **2026-10-22 — Pass active activity context and actions through shared chat**
 Context: The virtual client needs to understand the activity beside chat and interact with it while keeping every action auditable.
 Decision: Each activity registers its stable ID, serializable state, and action handler through `ActivityBridge`. A server-side activity registry validates the snapshot, generates activity context, and provides only that activity's tools to the provider. Provider tool calls are parsed into a shared format, validated by the activity definition, recorded in the transcript, and dispatched only to the activity instance that was active when the learner sent the message. A logged client-facing notice explains when tools become available.
@@ -237,4 +245,4 @@ Rationale: The whiteboard should feel like an activity inside the telehealth pra
 - [x] Install `@excalidraw/excalidraw`.
 - [x] Add a client-only Excalidraw wrapper compatible with Next.js SSR.
 - [x] Replace the static whiteboard placeholder while preserving the session layout.
-- [ ] Add the first whiteboard interaction/audit adapter after the editor renders.
+- [x] Add the first whiteboard interaction/audit adapter after the editor renders.

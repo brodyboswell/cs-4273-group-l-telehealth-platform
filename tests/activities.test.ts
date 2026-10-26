@@ -177,4 +177,26 @@ describe("activity action dispatch", () => {
 
     assert.deepEqual(received, [moodAction]);
   });
+
+  it("does not apply a doodle after leaving the whiteboard", () => {
+    const received: ActivityAction[] = [];
+    const whiteboard = {
+      activityId: "whiteboard",
+      onAction: (action: ActivityAction) => received.push(action),
+    };
+    const feelings = {
+      activityId: "feelings",
+      onAction: (action: ActivityAction) => received.push(action),
+    };
+    const doodleAction: ActivityAction = {
+      activityId: "whiteboard",
+      tool: "replace_whiteboard_with_doodle",
+      input: { strokes: [{ points: [{ x: 1, y: 1 }, { x: 99, y: 99 }] }] },
+    };
+
+    dispatchActivityActions(whiteboard, whiteboard, [doodleAction]);
+    dispatchActivityActions(feelings, whiteboard, [doodleAction]);
+
+    assert.deepEqual(received, [doodleAction]);
+  });
 });

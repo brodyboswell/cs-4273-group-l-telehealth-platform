@@ -62,7 +62,9 @@ When an activity with tools becomes active, the server adds a short virtual-clie
 3. In the activity component, call `useActivityTools(activityId, serializableState, onAction)`. Keep the state limited to the information the client needs to see and act on; apply only the action names and inputs that component understands.
 4. Add registry and chat API coverage for valid and invalid state/actions. Provider-specific chat code should not need activity-specific branches.
 
-The feelings chart is the first registered example: it provides `select_mood`, validates the selected mood against `MOOD_OPTIONS`, and updates the selected card through the bridge. The pattern is intended to support chess and other activities through their own definition and handler.
+The feelings chart and whiteboard are registered examples. The feelings chart provides `select_mood`, validates the selected mood against `MOOD_OPTIONS`, and updates the selected card through the bridge. Chess can follow the same pattern through its own definition and handler.
+
+The whiteboard provides `replace_whiteboard_with_doodle`. Its input contains bounded freehand strokes on a normalized 0–100 canvas and an optional short caption; the server validates and records the action before the browser maps it to Excalidraw elements. The tool replaces the current scene, and Excalidraw undo restores the previous scene. The activity context instructs the client to draw only after a direct learner invitation. The offline mock does not generate doodles.
 
 ## Endpoints
 

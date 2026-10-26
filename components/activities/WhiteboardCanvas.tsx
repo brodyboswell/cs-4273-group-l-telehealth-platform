@@ -1,13 +1,25 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   ExcalidrawImperativeAPI,
   ExcalidrawProps,
 } from "@excalidraw/excalidraw/types";
+import { useActivityTools } from "@/components/session/ActivityBridge";
 import { Icon } from "@/components/ui/Icon";
-import { WHITEBOARD_DOODLE_COLORS } from "@/lib/whiteboard/doodle";
+import type { ActivityAction } from "@/lib/activities/types";
+import {
+  parseWhiteboardDoodle,
+  WHITEBOARD_DOODLE_COLORS,
+} from "@/lib/whiteboard/doodle";
+import { toExcalidrawDoodleSkeletons } from "@/lib/whiteboard/excalidrawDoodle";
 import "@excalidraw/excalidraw/index.css";
 
 export function preloadWhiteboardEditor() {
@@ -36,13 +48,16 @@ const TOOLS = [
 ] as const;
 export function WhiteboardCanvas() {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
+  const [hasContent, setHasContent] = useState(false);
+  const [clientStatus, setClientStatus] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
   const [{ activeTool, color, strokeWidth }, setControls] = useState({
     activeTool: "freedraw",
     color: WHITEBOARD_DOODLE_COLORS[0].value as string,
     strokeWidth: 2,
   });
   const handleChange = useCallback<NonNullable<ExcalidrawProps["onChange"]>>(
-    (_, state) => {
+    (elements, state) => {
       const next = {
         activeTool: state.activeTool.type,
         color: state.currentItemStrokeColor,
@@ -56,9 +71,21 @@ export function WhiteboardCanvas() {
           ? previous
           : next,
       );
+      const nextHasContent = elements.some((element) => !element.isDeleted);
+      setHasContent((previous) =>
+        previous === nextHasContent ? previous : nextHasContent,
+      );
     },
     [],
   );
+
+  const handleClientDoodleApplied = useCallback(() => {
+    setClientStatus("The client replaced the whiteboard with a doodle.");
+    setActionError(null);
+  }, []);
+  const handleClientDoodleError = useCallback((message: string) => {
+    setActionError(message);
+  }, []);
 
   return (
     <div className="kid-whiteboard flex h-full flex-col gap-3 bg-charcoal p-3 sm:p-5">
@@ -136,6 +163,17 @@ export function WhiteboardCanvas() {
           </select>
         </label>
       </div>
+      {actionError && (
+        <p
+          className="rounded-xl bg-terracotta/15 px-3 py-2 text-sm text-white"
+          role="alert"
+        >
+          {actionError}
+        </p>
+      )}
+      <p className="sr-only" role="status" aria-live="polite">
+        {clientStatus}
+      </p>
       <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl bg-white">
         <Excalidraw
           excalidrawAPI={setApi}
@@ -164,7 +202,92 @@ export function WhiteboardCanvas() {
             tools: { image: false },
           }}
         />
+        {api && (
+          <WhiteboardActivityController
+            api={api}
+            hasContent={hasContent}
+            onApplied={handleClientDoodleApplied}
+            onError={handleClientDoodleError}
+          />
+        )}
       </div>
     </div>
   );
+}
+
+function WhiteboardActivityController({
+  api,
+  hasContent,
+  onApplied,
+  onError,
+}: {
+  api: ExcalidrawImperativeAPI;
+  hasContent: boolean;
+  onApplied(): void;
+  onError(message: string): void;
+}) {
+  const isMounted = useRef(false);
+  const state = useMemo(() => ({ hasContent }), [hasContent]);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  const handleAction = useCallback(
+    (action: ActivityAction) => {
+      if (
+        action.activityId !== "whiteboard" ||
+        action.tool !== "replace_whiteboard_with_doodle"
+      )
+        return;
+
+      let doodle: ReturnType<typeof parseWhiteboardDoodle>;
+      try {
+        // Recheck the server-validated payload at the renderer boundary too.
+        doodle = parseWhiteboardDoodle(action.input);
+      } catch (error) {
+        onError(
+          error instanceof Error
+            ? error.message
+            : "The client returned an invalid doodle.",
+        );
+        return;
+      }
+
+      void preloadWhiteboardEditor()
+        .then(({ convertToExcalidrawElements, CaptureUpdateAction }) => {
+          if (!isMounted.current) return;
+
+          const elements = convertToExcalidrawElements(
+            toExcalidrawDoodleSkeletons(doodle),
+            { regenerateIds: true },
+          );
+          api.updateScene({
+            elements,
+            appState: { selectedElementIds: {} },
+            captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+          });
+          api.scrollToContent(elements, {
+            fitToContent: true,
+            animate: true,
+          });
+          onApplied();
+        })
+        .catch((error: unknown) => {
+          if (!isMounted.current) return;
+          onError(
+            error instanceof Error
+              ? error.message
+              : "Could not apply the client doodle.",
+          );
+        });
+    },
+    [api, onApplied, onError],
+  );
+
+  useActivityTools("whiteboard", state, handleAction);
+  return null;
 }
