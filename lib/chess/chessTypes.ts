@@ -1,4 +1,4 @@
-import type { Square } from "chess.js";
+import { Chess, type Move, type PieceSymbol, type Square } from "chess.js";
 
 export type ChessColor = "w" | "b";
 export type ChessPromotion = "q" | "r" | "b" | "n";
@@ -12,7 +12,7 @@ export type ChessMove = {
 export type ChessToolInput = {
   type: "play_chess_move";
   move: ChessMove;
-  commentary: string;
+  spokenText: string;
   gameId: string;
   turnEpoch: number;
   fen: string;
@@ -73,8 +73,8 @@ export function parseChessToolInput(
     fen: string;
   },
 ): ChessToolInput {
-  if (!isRecord(value) || Object.keys(value).some((key) => !["move", "commentary"].includes(key)))
-    throw new Error("Expected a legal move and brief client commentary.");
+  if (!isRecord(value) || Object.keys(value).some((key) => key !== "move"))
+    throw new Error("Expected one listed legal move.");
   if (typeof value.move !== "string")
     throw new Error("Choose one of the listed legal moves.");
   const move = state.legalMoves.find(
@@ -82,20 +82,51 @@ export function parseChessToolInput(
   );
   if (!move)
     throw new Error("The selected move is not legal in the current position.");
-  if (
-    typeof value.commentary !== "string" ||
-    !value.commentary.trim() ||
-    value.commentary.length > 500
-  )
-    throw new Error("Client commentary must be 1–500 characters.");
+
+  const game = new Chess(state.fen);
+  const playedMove = game.move(move);
   return {
     type: "play_chess_move",
     move,
-    commentary: value.commentary.trim(),
+    spokenText: describeChessMove(playedMove, game),
     gameId: state.gameId,
     turnEpoch: state.turnEpoch,
     fen: state.fen,
   };
+}
+
+const PIECE_NAMES: Record<PieceSymbol, string> = {
+  k: "king",
+  q: "queen",
+  r: "rook",
+  b: "bishop",
+  n: "knight",
+  p: "pawn",
+};
+
+function describeChessMove(move: Move, resultingPosition: Chess): string {
+  let description: string;
+  if (move.isKingsideCastle()) {
+    description = "I castle kingside.";
+  } else if (move.isQueensideCastle()) {
+    description = "I castle queenside.";
+  } else if (move.isCapture() || move.isEnPassant()) {
+    const capturedSquare = move.isEnPassant()
+      ? `${move.to[0]}${move.from[1]}`
+      : move.to;
+    const promotion = move.promotion
+      ? ` and promote my pawn to a ${PIECE_NAMES[move.promotion]}`
+      : "";
+    description = `I capture the ${PIECE_NAMES[move.captured!]} on ${capturedSquare} with my ${PIECE_NAMES[move.piece]}${promotion}.`;
+  } else if (move.isPromotion()) {
+    description = `I promote my pawn on ${move.to} to a ${PIECE_NAMES[move.promotion!]}.`;
+  } else {
+    description = `I move my ${PIECE_NAMES[move.piece]} from ${move.from} to ${move.to}.`;
+  }
+
+  if (resultingPosition.isCheckmate()) return `${description} That's checkmate.`;
+  if (resultingPosition.isCheck()) return `${description} That's check.`;
+  return description;
 }
 
 /** Match all move fields so a promotion must name the exact promoted piece. */

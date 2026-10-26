@@ -118,6 +118,13 @@ public/                      # Static images and avatars
 
 *Append-only. Add new entries at the top.*
 
+**2026-10-26 — Derive Chess speech from the validated move**
+Context: The client once said it would capture a pawn while its legal tool action advanced a pawn instead.
+Decision: Remove freeform commentary from the Chess tool. After validating the move against the replayed position, derive the spoken line from chess.js move metadata and prefer that line over provider prose.
+Rationale: The move narration now matches the accepted action for captures, ordinary moves, castling, promotion, check, and checkmate.
+
+---
+
 **2026-10-26 — Keep tool-only feelings responses visible and actionable**
 Context: A provider can return a valid `select_mood` call without separate assistant text; requiring text before storing the action caused a 502 and prevented the feelings chart from updating.
 Decision: When a validated activity action has no provider text, use its client-facing `commentary` or `rationale` field for the virtual-client transcript line.

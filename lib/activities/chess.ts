@@ -114,8 +114,7 @@ function describeState(state: ChessActivityState): string {
 
 const chessTool = {
   name: "play_chess_move",
-  description:
-    "Play one of the listed legal chess moves. Include a brief spoken line about the move.",
+  description: "Play exactly one of the listed legal chess moves.",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -124,15 +123,11 @@ const chessTool = {
         description: "An exact move ID from the currently available legal moves.",
         enum: [],
       },
-      commentary: {
-        type: "string" as const,
-        description: "A brief first-person spoken line to accompany your move.",
-      },
     },
-    required: ["move", "commentary"],
+    required: ["move"],
     additionalProperties: false,
   },
-  mockInput: { move: "e2e4", commentary: "I’ll try this move." },
+  mockInput: { move: "e2e4" },
   parseInput(value: unknown, rawState?: unknown) {
     if (!rawState || typeof rawState !== "object")
       throw new Error("The current chess state is required to validate a move.");
@@ -166,7 +161,6 @@ const definition: ActivityDefinition<ChessActivityState> = {
         },
         mockInput: {
           move: chessMoveId(state.legalMoves[0]!),
-          commentary: "I’ll try this move.",
         },
       },
     ];

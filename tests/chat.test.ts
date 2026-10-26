@@ -362,6 +362,10 @@ describe("chat HTTP endpoints", () => {
     assert.equal(firstData.reply.actions[0].input.turnEpoch, 1);
     assert.equal(firstData.reply.actions[0].input.fen, game.fen());
     assert.equal(
+      firstData.reply.text,
+      firstData.reply.actions[0].input.spokenText,
+    );
+    assert.equal(
       firstData.transcript.entries.filter((entry: { speaker: string }) => entry.speaker === "learner").length,
       0,
     );
@@ -380,6 +384,83 @@ describe("chat HTTP endpoints", () => {
     });
     assert.equal(invalid.status, 400);
     assert.equal(await readTranscript("invalid-chess-turn"), null);
+  });
+
+  it("uses the move-derived chess line instead of contradictory provider text", async (context) => {
+    const previousProvider = process.env.LLM_PROVIDER;
+    const previousOpenAiKey = process.env.OPENAI_API_KEY;
+    const game = new Chess();
+    game.move({ from: "e2", to: "e4" });
+    game.move({ from: "f7", to: "f5" });
+    const gameId = "chess-speech-game";
+    context.mock.method(globalThis, "fetch", async () =>
+      Response.json({
+        model: "test-model",
+        choices: [
+          {
+            message: {
+              content: "I'm gonna take your pawn.",
+              tool_calls: [
+                {
+                  type: "function",
+                  function: {
+                    name: "play_chess_move",
+                    arguments: JSON.stringify({ move: "e4e5" }),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+
+    try {
+      process.env.LLM_PROVIDER = "openai";
+      process.env.OPENAI_API_KEY = "test-key";
+      const response = await post({
+        sessionId: "chess-speech-session",
+        activityTurn: {
+          activity: {
+            activityId: "chess",
+            state: {
+              gameId,
+              turnEpoch: 2,
+              fen: game.fen(),
+              moveHistory: game.history({ verbose: true }).map((move) => ({
+                from: move.from,
+                to: move.to,
+                ...(move.promotion ? { promotion: move.promotion } : {}),
+              })),
+              learnerColor: "b",
+            },
+          },
+          requestId: `${gameId}-2`,
+          event: {
+            type: "learner_move",
+            input: { move: { from: "f7", to: "f5" } },
+          },
+        },
+      });
+
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.deepEqual(data.reply.actions[0].input.move, {
+        from: "e4",
+        to: "e5",
+      });
+      assert.equal(
+        data.reply.actions[0].input.spokenText,
+        "I move my pawn from e4 to e5.",
+      );
+      assert.equal(data.reply.text, data.reply.actions[0].input.spokenText);
+      assert.notEqual(data.reply.text, "I'm gonna take your pawn.");
+    } finally {
+      if (previousProvider === undefined) delete process.env.LLM_PROVIDER;
+      else process.env.LLM_PROVIDER = previousProvider;
+      if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previousOpenAiKey;
+    }
   });
 
   it("plays the client opening move when the learner chooses Black", async () => {

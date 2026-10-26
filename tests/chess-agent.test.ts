@@ -62,13 +62,13 @@ describe("chess activity state and tools", () => {
     const action = activityRegistry.validateAction(
       "chess",
       "play_chess_move",
-      { move: "e7e5", commentary: "I’ll try this move." },
+      { move: "e7e5" },
       resolved.state,
     );
     assert.deepEqual(action.input, {
       type: "play_chess_move",
       move: { from: "e7", to: "e5" },
-      commentary: "I’ll try this move.",
+      spokenText: "I move my pawn from e7 to e5.",
       gameId: "chess-game-123",
       turnEpoch: 4,
       fen: resolved.state && (resolved.state as { fen: string }).fen,
@@ -79,10 +79,37 @@ describe("chess activity state and tools", () => {
         activityRegistry.validateAction(
           "chess",
           "play_chess_move",
-          { move: "e7e4", commentary: "That should work." },
+          { move: "e7e4" },
           resolved.state,
         ),
       ActivityRegistryError,
+    );
+  });
+
+  it("describes the validated move accurately, including a capture", () => {
+    const history = movesFromSan(["e4", "f5"]);
+    const resolved = activityRegistry.resolve(snapshotFromMoves(history, "b"));
+
+    const push = activityRegistry.validateAction(
+      "chess",
+      "play_chess_move",
+      { move: "e4e5" },
+      resolved.state,
+    );
+    assert.equal(
+      (push.input as { spokenText: string }).spokenText,
+      "I move my pawn from e4 to e5.",
+    );
+
+    const capture = activityRegistry.validateAction(
+      "chess",
+      "play_chess_move",
+      { move: "e4f5" },
+      resolved.state,
+    );
+    assert.equal(
+      (capture.input as { spokenText: string }).spokenText,
+      "I capture the pawn on f5 with my pawn.",
     );
   });
 
@@ -149,12 +176,32 @@ describe("chess activity state and tools", () => {
     );
     const castlingOptions = getMoveOptions(castling.tools[0]);
     assert.ok(castlingOptions.includes("e1g1"));
+    const castleAction = activityRegistry.validateAction(
+      "chess",
+      "play_chess_move",
+      { move: "e1g1" },
+      castling.state,
+    );
+    assert.equal(
+      (castleAction.input as { spokenText: string }).spokenText,
+      "I castle kingside.",
+    );
 
     const enPassantMoves = movesFromSan(["e4", "a6", "e5", "d5"]);
     const enPassant = activityRegistry.resolve(
       snapshotFromMoves(enPassantMoves, "b"),
     );
     assert.ok(getMoveOptions(enPassant.tools[0]).includes("e5d6"));
+    const enPassantAction = activityRegistry.validateAction(
+      "chess",
+      "play_chess_move",
+      { move: "e5d6" },
+      enPassant.state,
+    );
+    assert.equal(
+      (enPassantAction.input as { spokenText: string }).spokenText,
+      "I capture the pawn on d5 with my pawn.",
+    );
 
     const promotionMoves = movesFromSan([
       "h3",
@@ -175,6 +222,16 @@ describe("chess activity state and tools", () => {
     for (const piece of ["q", "r", "b", "n"])
       assert.ok(promotionOptions.includes(`b7a8${piece}`));
     assert.equal(chessMoveId({ from: "b7", to: "a8", promotion: "q" }), "b7a8q");
+    const promotionAction = activityRegistry.validateAction(
+      "chess",
+      "play_chess_move",
+      { move: "b7a8q" },
+      promotion.state,
+    );
+    assert.equal(
+      (promotionAction.input as { spokenText: string }).spokenText,
+      "I capture the rook on a8 with my pawn and promote my pawn to a queen.",
+    );
   });
 
   it("rejects inconsistent histories and withholds tools after a terminal game", () => {
@@ -206,7 +263,7 @@ describe("chess activity state and tools", () => {
     const action = {
       type: "play_chess_move",
       move: { from: "e7", to: "e5" },
-      commentary: "I will try this move.",
+      spokenText: "I move my pawn from e7 to e5.",
       gameId: "chess-game-123",
       turnEpoch: 4,
       fen: "position-fen",
