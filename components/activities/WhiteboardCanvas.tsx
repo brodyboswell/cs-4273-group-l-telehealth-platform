@@ -7,6 +7,7 @@ import type {
   ExcalidrawProps,
 } from "@excalidraw/excalidraw/types";
 import { Icon } from "@/components/ui/Icon";
+import { WHITEBOARD_DOODLE_COLORS } from "@/lib/whiteboard/doodle";
 import "@excalidraw/excalidraw/index.css";
 
 export function preloadWhiteboardEditor() {
@@ -33,20 +34,11 @@ const TOOLS = [
   { type: "rectangle", label: "Box", icon: "rectangle" },
   { type: "ellipse", label: "Circle", icon: "ellipse" },
 ] as const;
-const COLORS = [
-  { name: "Dark green", value: "#293c35" },
-  { name: "Red", value: "#cf5547" },
-  { name: "Orange", value: "#df8b37" },
-  { name: "Green", value: "#53886b" },
-  { name: "Blue", value: "#477fb2" },
-  { name: "Purple", value: "#8a63aa" },
-] as const;
-
 export function WhiteboardCanvas() {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [{ activeTool, color, strokeWidth }, setControls] = useState({
     activeTool: "freedraw",
-    color: COLORS[0].value as string,
+    color: WHITEBOARD_DOODLE_COLORS[0].value as string,
     strokeWidth: 2,
   });
   const handleChange = useCallback<NonNullable<ExcalidrawProps["onChange"]>>(
@@ -103,7 +95,7 @@ export function WhiteboardCanvas() {
           role="group"
           aria-label="Ink colors"
         >
-          {COLORS.map((ink) => (
+          {WHITEBOARD_DOODLE_COLORS.map((ink) => (
             <button
               key={ink.value}
               type="button"
@@ -155,7 +147,7 @@ export function WhiteboardCanvas() {
                 lastActiveTool: null,
                 customType: null,
               },
-              currentItemStrokeColor: COLORS[0].value,
+              currentItemStrokeColor: WHITEBOARD_DOODLE_COLORS[0].value,
               currentItemStrokeWidth: 2,
               viewBackgroundColor: "#ffffff",
             },
