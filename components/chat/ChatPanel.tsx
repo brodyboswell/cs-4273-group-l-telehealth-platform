@@ -12,7 +12,11 @@ import type {
   Transcript,
   TranscriptEntry,
 } from "@/lib/chat/types";
-import { useActivityBridge } from "@/components/session/ActivityBridge";
+import { waitForMinimumThinkTime } from "@/lib/chat/thinkDelay";
+import {
+  useActivityBridge,
+  type ActivityTurnDispatchRequest,
+} from "@/components/session/ActivityBridge";
 
 const SESSION_STORAGE_KEY = "telehealth.practiceSessionId";
 
@@ -60,6 +64,10 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sessionIdRef = useRef(sessionId);
+  const loadingRef = useRef(loading);
+  sessionIdRef.current = sessionId;
+  loadingRef.current = loading;
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -226,6 +234,116 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
     }
   }
 
+  const requestActivityTurn = useCallback(
+    async (request: ActivityTurnDispatchRequest) => {
+      if (sendInFlight.current)
+        throw new Error("The chat is busy; retry the chess move in a moment.");
+
+      sendInFlight.current = true;
+      setSending(true);
+      let id: string | null = null;
+      let reconciledTranscript: Transcript | null = null;
+      const startedAt = performance.now();
+      setError(null);
+
+      try {
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          id = sessionIdRef.current;
+          if (id && !loadingRef.current) break;
+          await new Promise((resolve) => window.setTimeout(resolve, 25));
+        }
+        id = sessionIdRef.current;
+        if (!id || loadingRef.current)
+          throw new Error("The session chat did not finish loading. Retry the chess move.");
+
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId: id,
+            activityTurn: {
+              activity: request.snapshot,
+              requestId: request.requestId,
+              event: request.event,
+            },
+          } satisfies ChatRequestBody),
+        });
+        const data: unknown = await res.json().catch(() => null);
+        if (activeSession.current !== id) return;
+
+        if (
+          res.ok &&
+          isRecord(data) &&
+          isTranscript(data.transcript) &&
+          data.transcript.sessionId === id &&
+          isRecord(data.reply) &&
+          data.reply.speaker === "virtual_client" &&
+          data.reply.activityTurnId === request.requestId
+        ) {
+          setEntries(data.transcript.entries);
+          const replySequence = (data.reply as Record<string, unknown>).seq;
+          const savedReply = data.transcript.entries.find(
+            (entry) =>
+              entry.speaker === "virtual_client" &&
+              entry.seq === replySequence &&
+              entry.activityTurnId === request.requestId,
+          );
+          if (!savedReply?.actions?.length)
+            throw new Error("The session returned an invalid chess turn reply.");
+          await waitForMinimumThinkTime(startedAt);
+          request.dispatch(savedReply.actions ?? []);
+          return;
+        }
+
+        reconciledTranscript = await loadTranscript(id);
+        const savedReply = reconciledTranscript?.entries.find(
+          (entry) =>
+            entry.speaker === "virtual_client" &&
+            entry.activityTurnId === request.requestId &&
+            (entry.actions?.length ?? 0) > 0,
+        );
+        if (savedReply) {
+          await waitForMinimumThinkTime(startedAt);
+          request.dispatch(savedReply.actions ?? []);
+          return;
+        }
+
+        const errorMessage =
+          isRecord(data) && typeof data.error === "string"
+            ? data.error
+            : "The virtual client could not choose a chess move.";
+        setError(errorMessage);
+        throw new Error(errorMessage);
+      } catch (requestError) {
+        if (id && activeSession.current === id) {
+          if (!reconciledTranscript)
+            reconciledTranscript = await loadTranscript(id);
+          const savedReply = reconciledTranscript?.entries.find(
+            (entry) =>
+              entry.speaker === "virtual_client" &&
+              entry.activityTurnId === request.requestId &&
+              (entry.actions?.length ?? 0) > 0,
+          );
+          if (savedReply) {
+            await waitForMinimumThinkTime(startedAt);
+            request.dispatch(savedReply.actions ?? []);
+            return;
+          }
+        }
+        throw requestError;
+      } finally {
+        sendInFlight.current = false;
+        setSending(false);
+      }
+    },
+    [loadTranscript],
+  );
+
+  useEffect(
+    () => activityBridge.registerTurnRequester(requestActivityTurn),
+    [activityBridge, requestActivityTurn],
+  );
+
   function startNewSession() {
     const id = newSessionId();
     saveSessionId(id);
@@ -316,24 +434,32 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
 
           {visible.map((e, i) => {
             const mine = e.speaker === "learner";
+            const activityEvent = e.speaker === "activity";
 
             return (
               <div
                 key={`${e.seq}-${i}`}
-                className={`flex flex-col ${mine ? "items-end" : "items-start"}`}
+                className={`flex flex-col ${activityEvent ? "items-center" : mine ? "items-end" : "items-start"}`}
               >
                 <div
                   className={`whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm leading-relaxed ${
-                    mine
+                    activityEvent
+                      ? "max-w-full rounded-panel border border-sage/30 bg-sage/10 text-center text-charcoal"
+                      : mine
                       ? "rounded-br-sm bg-sage text-white"
                       : "rounded-bl-sm border border-charcoal/10 bg-white text-charcoal"
                   } ${compact ? "max-w-[92%]" : "max-w-[80%]"}`}
                 >
+                  {activityEvent && (
+                    <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-charcoal/50">
+                      Chess activity
+                    </span>
+                  )}
                   {e.text}
                 </div>
 
                 <span className="mt-1 px-1 text-[11px] text-charcoal/45">
-                  {mine ? "You" : clientName} · {formatTime(e.timestamp)}
+                  {activityEvent ? "Activity" : mine ? "You" : clientName} · {formatTime(e.timestamp)}
                 </span>
               </div>
             );

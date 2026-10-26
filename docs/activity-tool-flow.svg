@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title description">
+  <title id="title">How the virtual client uses activity tools</title>
+  <desc id="description">The learner sends a chat message or makes a chess move while an activity is open. The chat panel sends the activity state and, for chess, the turn event to the server. The server validates the state, gives the active activity's context and tools to the language model, validates and logs the returned action, then sends it back through the activity bridge to update the activity.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0 10 5 0 10Z" fill="#52635A" />
+    </marker>
+    <style>
+      .title { font: 700 30px Inter, ui-sans-serif, system-ui, sans-serif; fill: #293C35; }
+      .subtitle { font: 400 16px Inter, ui-sans-serif, system-ui, sans-serif; fill: #53645B; }
+      .step { font: 700 14px Inter, ui-sans-serif, system-ui, sans-serif; fill: #6B786F; letter-spacing: 1px; }
+      .heading { font: 700 19px Inter, ui-sans-serif, system-ui, sans-serif; fill: #293C35; }
+      .body { font: 400 15px Inter, ui-sans-serif, system-ui, sans-serif; fill: #3F5148; }
+      .small { font: 400 13px Inter, ui-sans-serif, system-ui, sans-serif; fill: #53645B; }
+      .arrow-label { font: 600 13px Inter, ui-sans-serif, system-ui, sans-serif; fill: #52635A; }
+      .box { stroke: #AEBDB2; stroke-width: 1.5; rx: 16; }
+      .line { fill: none; stroke: #52635A; stroke-width: 2.5; marker-end: url(#arrow); }
+      .dashed { fill: none; stroke: #7A8B80; stroke-width: 2; stroke-dasharray: 7 6; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1200" height="760" fill="#F7F6F2" />
+  <text x="56" y="62" class="title">How the virtual client uses activity tools</text>
+  <text x="56" y="91" class="subtitle">The same validated tool flow supports feelings check-ins and automatic chess turns</text>
+
+  <!-- Learner and activity -->
+  <rect x="56" y="151" width="245" height="154" class="box" fill="#FFFFFF" />
+  <text x="80" y="181" class="step">1 · IN THE BROWSER</text>
+  <text x="80" y="215" class="heading">Learner + activity</text>
+  <text x="80" y="245" class="body">Learner chats or plays a move.</text>
+  <text x="80" y="269" class="body">Chart or board registers state</text>
+  <text x="80" y="291" class="body">and a handler for client actions.</text>
+
+  <!-- Chat panel -->
+  <rect x="365" y="151" width="245" height="154" class="box" fill="#E8EFEA" />
+  <text x="389" y="181" class="step">2 · CHAT PANEL</text>
+  <text x="389" y="215" class="heading">Capture activity</text>
+  <text x="389" y="245" class="body">Sends the message or chess</text>
+  <text x="389" y="269" class="body">turn event plus activity state</text>
+  <text x="389" y="291" class="body">to POST /api/chat.</text>
+
+  <!-- Server registry -->
+  <rect x="674" y="151" width="245" height="154" class="box" fill="#F1EDE2" />
+  <text x="698" y="181" class="step">3 · SERVER</text>
+  <text x="698" y="215" class="heading">Validate + prepare</text>
+  <text x="698" y="245" class="body">Registry validates the state.</text>
+  <text x="698" y="269" class="body">Chess replays move history and</text>
+  <text x="698" y="291" class="body">offers only current legal moves.</text>
+
+  <!-- LLM -->
+  <rect x="983" y="151" width="161" height="154" class="box" fill="#E8EFEA" />
+  <text x="1007" y="181" class="step">4 · LLM</text>
+  <text x="1007" y="215" class="heading">Respond</text>
+  <text x="1007" y="245" class="body">Returns text</text>
+  <text x="1007" y="269" class="body">and may call</text>
+  <text x="1007" y="291" class="body">a tool.</text>
+
+  <path d="M301 228H355" class="line" />
+  <path d="M610 228H664" class="line" />
+  <path d="M919 228H973" class="line" />
+  <text x="306" y="213" class="arrow-label">message</text>
+  <text x="616" y="213" class="arrow-label">request</text>
+  <text x="926" y="213" class="arrow-label">context + tools</text>
+
+  <!-- Return path -->
+  <rect x="674" y="414" width="245" height="168" class="box" fill="#F6E8E1" />
+  <text x="698" y="444" class="step">5 · SERVER CHECK</text>
+  <text x="698" y="478" class="heading">Validate + log action</text>
+  <text x="698" y="508" class="body">Checks the tool and selected</text>
+  <text x="698" y="532" class="body">move against the active state.</text>
+  <text x="698" y="556" class="body">Records events and accepted</text>
+  <text x="698" y="578" class="body">actions before returning.</text>
+
+  <rect x="365" y="414" width="245" height="168" class="box" fill="#E8EFEA" />
+  <text x="389" y="444" class="step">6 · CHAT PANEL + BRIDGE</text>
+  <text x="389" y="478" class="heading">Show + dispatch</text>
+  <text x="389" y="508" class="body">Displays the client reply and</text>
+  <text x="389" y="532" class="body">dispatches accepted actions to</text>
+  <text x="389" y="556" class="body">the same mounted activity via</text>
+  <text x="389" y="578" class="body">the bridge.</text>
+
+  <rect x="56" y="414" width="245" height="168" class="box" fill="#FFFFFF" />
+  <text x="80" y="444" class="step">7 · ACTIVITY UPDATES</text>
+  <text x="80" y="478" class="heading">Chart or board updates</text>
+  <text x="80" y="508" class="body">The chart selects a feeling or</text>
+  <text x="80" y="532" class="body">the board plays a legal move,</text>
+  <text x="80" y="556" class="body">after checking it is still current.</text>
+
+  <path d="M1063 305V363H796V404" class="line" />
+  <text x="889" y="352" class="arrow-label">reply + required chess move</text>
+  <path d="M674 498H620" class="line" />
+  <path d="M365 498H311" class="line" />
+  <text x="613" y="483" class="arrow-label" text-anchor="end">validated reply</text>
+  <text x="357" y="483" class="arrow-label" text-anchor="end">action</text>
+
+  <rect x="56" y="635" width="1088" height="70" rx="14" fill="#E8EFEA" />
+  <text x="80" y="665" class="heading">Safety boundary</text>
+  <text x="250" y="665" class="body">The model proposes an action; the server validates and logs it, and the activity applies only its supported actions.</text>
+  <text x="250" y="688" class="small">If the learner has switched activities before the response arrives, the old action is not applied to the new activity.</text>
+</svg>

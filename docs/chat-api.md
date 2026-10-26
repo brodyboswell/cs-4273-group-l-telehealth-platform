@@ -34,7 +34,7 @@ That makes the transcript the single source of truth for grading and research.
 
 ## Activity context and tools
 
-When an activity is open, its component registers its stable activity ID, current serializable state, and action handler through `useActivityTools` in `components/session/ActivityBridge.tsx`. `SessionShell` provides the bridge to both the activity and the persistent `ChatPanel`. On send, the panel includes the current `{ activityId, state }` snapshot alongside the learner's unchanged message. Returning to the main room unregisters the activity, so chat sends no activity snapshot.
+When an activity is open, its component registers its stable activity ID, current serializable state, and action handler through `useActivityTools` in `components/session/ActivityBridge.tsx`. `SessionShell` provides the bridge to both the activity and the persistent `ChatPanel`. A learner chat send includes the current `{ activityId, state }` snapshot alongside the unchanged message. Chess can also request a client turn through that same bridge after a learner move; this request has no fabricated chat message.
 
 Example request while the feelings chart is open:
 
@@ -51,24 +51,51 @@ Example request while the feelings chart is open:
 
 The browser snapshot is untrusted. `lib/activities/catalog.ts` contains the allowed activity definitions; `lib/activities/registry.ts` rejects unknown IDs and validates the state before using the activity's server-authored description and tool schemas. Only the active activity's tools are sent to the provider. Anthropic and OpenAI requests are mapped from the shared schema in `lib/chat/llm.ts`; the mock provider uses an optional deterministic `mockInput`.
 
-The server validates each provider call with that activity tool's `parseInput` before returning it. Accepted actions are recorded on the virtual-client transcript entry, next to the reply. Rejected calls create a system audit entry and are never dispatched. `ChatPanel` dispatches accepted actions only to the same mounted activity instance that was active when the learner sent the message; stale actions stay logged but are not applied.
+Chess state contains a game ID, turn epoch, FEN, learner color, and the ordered moves from the standard starting position. The server replays that history with `chess.js`, verifies the resulting FEN, and derives legal moves itself. On the client turn, `play_chess_move` receives a state-specific list of exact move IDs (including distinct promotion choices); the server rejects any move outside that list. The offline mock chooses the first currently legal option. After validating the selected move, the server derives the client-facing move description from the resulting chess move (including captures, castling, promotion, check, and checkmate); freeform model prose cannot override that line.
+
+The board-triggered turn uses this request form after a learner move. `event` is validated against the reconstructed board; an opening event is used when the learner chose Black.
+
+```json
+{
+  "sessionId": "demo-session-1",
+  "activityTurn": {
+    "activity": {
+      "activityId": "chess",
+      "state": {
+        "gameId": "chess-game-123",
+        "turnEpoch": 1,
+        "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+        "moveHistory": [{ "from": "e2", "to": "e4" }],
+        "learnerColor": "w"
+      }
+    },
+    "requestId": "chess-game-123-1",
+    "event": {
+      "type": "learner_move",
+      "input": { "move": { "from": "e2", "to": "e4" } }
+    }
+  }
+}
+```
+
+The server validates each provider call with that activity tool's `parseInput` before returning it. Accepted actions are recorded on the virtual-client transcript entry, next to the reply. Rejected calls create a system audit entry and are never dispatched. `ChatPanel` dispatches accepted actions only to the same mounted activity instance captured for the request; the chess board also rechecks the action against its current FEN and turn epoch before applying it. Turn request IDs make successful board-triggered requests idempotent.
 
 When an activity with tools becomes active, the server adds a short virtual-client message such as “I can interact with the feelings chart while we talk.” The notice is transcript-backed and records the activity and announced tool names. It is sent once for a stable activity/tool set, then repeated only when the learner returns to that activity or the available tool set changes.
 
 ### Adding an activity
 
-1. Add a definition under `lib/activities/` with an ID, short label, state parser, state description, provider-neutral tool schemas, and an input parser for each action.
+1. Add a definition under `lib/activities/` with an ID, short label, state parser, state description, provider-neutral tool schemas, and an input parser for each action. Definitions can derive tool availability from validated state and validate a board-triggered turn event.
 2. Add the definition to `lib/activities/catalog.ts`. The server registry will then accept its ID and offer its tools only while that activity is active.
 3. In the activity component, call `useActivityTools(activityId, serializableState, onAction)`. Keep the state limited to the information the client needs to see and act on; apply only the action names and inputs that component understands.
 4. Add registry and chat API coverage for valid and invalid state/actions. Provider-specific chat code should not need activity-specific branches.
 
-The feelings chart is the first registered example: it provides `select_mood`, validates the selected mood against `MOOD_OPTIONS`, and updates the selected card through the bridge. The pattern is intended to support chess and other activities through their own definition and handler.
+The feelings chart provides `select_mood`, validates the selected mood against `MOOD_OPTIONS`, and updates the selected card through the bridge. Chess provides `play_chess_move`, derives legal options from replayed state, and requests automatic client turns through the same bridge and chat service.
 
 ## Endpoints
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/chat` | Body `{ "sessionId": "...", "message": "...", "activity?": { "activityId": "...", "state": {} } }` → client reply, validated actions, and the full transcript |
+| POST | `/api/chat` | Learner chat body `{ "sessionId": "...", "message": "...", "activity?": { ... } }` → reply and transcript; or board-turn body `{ "sessionId": "...", "activityTurn": { "activity": { ... }, "requestId": "...", "event": { ... } } }` → activity event, required client tool action, and transcript |
 | GET | `/api/transcripts/:sessionId` | Transcript as JSON (creates the session and its opening line if it's new) |
 | GET | `/api/transcripts/:sessionId?format=txt` | Readable text transcript; add `&download=1` to download |
 | GET | `/api/transcripts` | List of all recorded sessions (newest first) |
@@ -100,15 +127,17 @@ Saved as `data/transcripts/<sessionId>.json` (change the folder with `TRANSCRIPT
     { "seq": 2, "speaker": "virtual_client", "text": "Hey. Um… my advisor said I should do this.", "timestamp": "...", "model": "scripted:opening-line" },
     { "seq": 3, "speaker": "virtual_client", "text": "I can interact with the feelings chart while we talk.", "timestamp": "...", "activityNotice": { "activityId": "feelings", "toolNames": ["select_mood"] } },
     { "seq": 4, "speaker": "learner", "text": "Hi Alex, thanks for coming in today.", "timestamp": "...", "activity": { "activityId": "feelings", "state": { "selectedMoodId": null } } },
-    { "seq": 5, "speaker": "virtual_client", "text": "I think I'm worried.", "timestamp": "...", "model": "anthropic:claude-haiku-4-5", "latencyMs": 812, "actions": [{ "activityId": "feelings", "tool": "select_mood", "input": { "type": "select_mood", "moodId": "worried", "rationale": "Something has been on my mind." } }] }
+    { "seq": 5, "speaker": "virtual_client", "text": "I think I'm worried.", "timestamp": "...", "model": "anthropic:claude-haiku-4-5", "latencyMs": 812, "actions": [{ "activityId": "feelings", "tool": "select_mood", "input": { "type": "select_mood", "moodId": "worried", "rationale": "Something has been on my mind." } }] },
+    { "seq": 6, "speaker": "activity", "text": "The learner played e2e4. It is your turn to move.", "timestamp": "...", "activity": { "activityId": "chess", "state": { "gameId": "chess-game-123", "turnEpoch": 1, "fen": "...", "moveHistory": [{ "from": "e2", "to": "e4" }], "learnerColor": "w" } }, "activityEvent": { "activityId": "chess", "requestId": "chess-game-123-1", "actor": "learner", "type": "move", "text": "The learner played e2e4. It is your turn to move.", "input": { "move": { "from": "e2", "to": "e4" } } } },
+    { "seq": 7, "speaker": "virtual_client", "text": "I move my pawn from e7 to e5.", "timestamp": "...", "activityTurnId": "chess-game-123-1", "actions": [{ "activityId": "chess", "tool": "play_chess_move", "input": { "type": "play_chess_move", "move": { "from": "e7", "to": "e5" }, "spokenText": "I move my pawn from e7 to e5.", "gameId": "chess-game-123", "turnEpoch": 1, "fen": "..." } }] }
   ]
 }
 ```
 
-- `speaker`: `learner` (the student), `virtual_client` (Alex or a platform-generated client-facing notice), `system` (session start, failed replies, rejected tool calls).
-- `activity` stores the validated state snapshot sent with a learner message (`null` means no activity was active); `actions` stores validated activity calls; `activityNotice` records which tools a visible client notice announced.
+- `speaker`: `learner` (spoken student message), `activity` (nonverbal activity event), `virtual_client` (Alex or a platform-generated client-facing notice), `system` (session start, failed replies, rejected tool calls).
+- `activity` stores the validated activity snapshot; `activityEvent` records a structured nonverbal event separately from speech; `actions` stores validated tool calls; `activityNotice` records which tools a visible client notice announced; `activityTurnId` is the idempotency key for a chess turn response.
 - `seq` is strictly increasing; messages in the same session are processed one at a time within one server process. Locks do not coordinate separate workers or server instances.
-- If the AI fails, the learner's message is still kept and a `system` entry records the failure.
+- If the AI fails, the learner's message or activity event is still kept and a `system` entry records the failure.
 
 The session ID is kept in the browser tab's `sessionStorage`, so moving between the
 Whiteboard, Chess and Chat keeps the same session. **New session** starts a fresh one.

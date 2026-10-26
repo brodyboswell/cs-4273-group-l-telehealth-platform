@@ -1,6 +1,7 @@
 import type {
   ActivityAction,
   ActivitySnapshot,
+  ActivityTurnEvent,
   ActivityTool,
   RegisteredActivity,
 } from "./types";
@@ -11,6 +12,7 @@ export interface ResolvedActivity {
   state: unknown;
   description: string;
   tools: readonly ActivityTool[];
+  requiredToolName?: string;
 }
 
 export function buildActivityContext(activity: ResolvedActivity): string {
@@ -27,7 +29,18 @@ export function buildAvailabilityMessage(activity: ResolvedActivity): string {
 
 export interface ActivityRegistry {
   resolve(snapshot: unknown): ResolvedActivity;
-  validateAction(activityId: string, toolName: string, input: unknown): ActivityAction;
+  validateAction(
+    activityId: string,
+    toolName: string,
+    input: unknown,
+    state?: unknown,
+  ): ActivityAction;
+  validateTurnEvent(
+    activityId: string,
+    requestId: string,
+    event: unknown,
+    state: unknown,
+  ): ActivityTurnEvent;
 }
 
 export class ActivityRegistryError extends Error {
@@ -87,12 +100,24 @@ export function createActivityRegistry(
         if (typeof description !== "string" || !description.trim())
           throw new Error("Activity description must be a non-empty string.");
 
+        const tools = definition.getTools?.(state) ?? definition.tools;
+        assertValidTools(definition.id, tools);
+        const requiredToolName = definition.requiredToolName?.(state);
+        if (
+          requiredToolName &&
+          !tools.some((tool) => tool.name === requiredToolName)
+        )
+          throw new Error(
+            `Required tool "${requiredToolName}" is not available in this state.`,
+          );
+
         return {
           activityId: definition.id,
           label: definition.label,
           state,
           description,
-          tools: definition.tools,
+          tools,
+          requiredToolName,
         };
       } catch (error) {
         const detail =
@@ -103,21 +128,38 @@ export function createActivityRegistry(
       }
     },
 
-    validateAction(activityId: string, toolName: string, input: unknown) {
+    validateAction(
+      activityId: string,
+      toolName: string,
+      input: unknown,
+      state?: unknown,
+    ) {
       const definition = byId.get(activityId);
       if (!definition)
         throw new ActivityRegistryError(
           `Activity "${activityId}" is not registered.`,
         );
 
-      const tool = definition.tools.find(({ name }) => name === toolName);
+      let tool: ActivityTool | undefined;
+      try {
+        const tools =
+          definition.getTools && state !== undefined
+            ? definition.getTools(state)
+            : definition.tools;
+        tool = tools.find(({ name }) => name === toolName);
+      } catch (error) {
+        const detail = error instanceof Error ? ` ${error.message}` : "";
+        throw new ActivityRegistryError(
+          `Activity "${activityId}" state is invalid.${detail}`,
+        );
+      }
       if (!tool)
         throw new ActivityRegistryError(
           `Tool "${toolName}" is not registered for activity "${activityId}".`,
         );
 
       try {
-        const parsedInput = tool.parseInput(input);
+        const parsedInput = tool.parseInput(input, state);
         if (!isRecord(parsedInput))
           throw new Error("Tool input must be a JSON object.");
         return {
@@ -132,7 +174,51 @@ export function createActivityRegistry(
         );
       }
     },
+
+    validateTurnEvent(activityId, requestId, event, state) {
+      const definition = byId.get(activityId);
+      if (!definition)
+        throw new ActivityRegistryError(
+          `Activity "${activityId}" is not registered.`,
+        );
+      if (!definition.parseTurnEvent)
+        throw new ActivityRegistryError(
+          `Activity "${activityId}" does not support client turn requests.`,
+        );
+      try {
+        const parsed = definition.parseTurnEvent(event, requestId, state);
+        if (
+          parsed.activityId !== activityId ||
+          parsed.requestId !== requestId ||
+          !parsed.type.trim() ||
+          !parsed.text.trim() ||
+          !isRecord(parsed.input)
+        )
+          throw new Error("Activity turn event is incomplete.");
+        return parsed;
+      } catch (error) {
+        const detail = error instanceof Error ? ` ${error.message}` : "";
+        throw new ActivityRegistryError(
+          `Activity "${activityId}" turn event is invalid.${detail}`,
+        );
+      }
+    },
   };
+}
+
+function assertValidTools(activityId: string, tools: readonly ActivityTool[]) {
+  const names = new Set<string>();
+  for (const tool of tools) {
+    if (!tool.name.trim() || !tool.description.trim())
+      throw new ActivityRegistryError(
+        `Activity "${activityId}" has a tool without a name or description.`,
+      );
+    if (names.has(tool.name))
+      throw new ActivityRegistryError(
+        `Tool "${tool.name}" is registered more than once for activity "${activityId}".`,
+      );
+    names.add(tool.name);
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
