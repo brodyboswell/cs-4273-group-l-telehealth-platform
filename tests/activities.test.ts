@@ -58,11 +58,36 @@ describe("activity registry", () => {
 
     assert.match(activity.description, /already has content/);
     assert.match(activity.description, /directly asks/);
+    assert.match(activity.description, /emotion the learner named/);
     assert.deepEqual(
       activity.tools.map((tool) => tool.name),
       ["replace_whiteboard_with_doodle"],
     );
     assert.equal(activity.tools[0]?.mockInput, undefined);
+    const schema = activity.tools[0]?.inputSchema;
+    assert.ok(schema?.type === "object");
+    const strokes = schema.properties.strokes;
+    assert.ok(strokes?.type === "array");
+    assert.equal(strokes.minItems, 1);
+    assert.equal(strokes.maxItems, 16);
+    const point = strokes.items;
+    assert.ok(point.type === "object");
+    const points = point.properties.points;
+    assert.ok(points?.type === "array");
+    assert.equal(points.minItems, 2);
+    assert.equal(points.maxItems, 192);
+    assert.ok(points.items.type === "object");
+    assert.deepEqual(points.items.properties.x, {
+      type: "integer",
+      minimum: 0,
+      maximum: 100,
+    });
+    assert.deepEqual(schema.properties.caption, {
+      type: "string",
+      description: "Optional short caption, at most 80 characters.",
+      minLength: 1,
+      maxLength: 80,
+    });
   });
 
   it("rejects invalid whiteboard snapshots", () => {

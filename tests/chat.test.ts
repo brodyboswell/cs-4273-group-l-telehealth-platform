@@ -294,9 +294,7 @@ describe("chat HTTP endpoints", () => {
           {
             type: "tool_use",
             name: "replace_whiteboard_with_doodle",
-            input: {
-              strokes: [{ points: [{ x: -1, y: 20 }, { x: 70, y: 80 }] }],
-            },
+            input: { strokes: [] },
           },
         ],
       },
@@ -345,6 +343,8 @@ describe("chat HTTP endpoints", () => {
       };
       assert.match(body.system, /directly asks/);
       assert.match(body.system, /replaces the entire board/);
+      assert.match(body.system, /conversation history/);
+      assert.match(body.system, /simple expressive face or symbol/);
       assert.deepEqual(
         body.tools.map(({ name }) => name),
         ["replace_whiteboard_with_doodle"],
@@ -362,7 +362,8 @@ describe("chat HTTP endpoints", () => {
         rejectedData.transcript.entries.some(
           (entry: { speaker: string; text: string }) =>
             entry.speaker === "system" &&
-            entry.text.includes("Rejected activity tool call"),
+            entry.text.includes("Rejected activity tool call") &&
+            entry.text.includes("at least one stroke"),
         ),
       );
     } finally {

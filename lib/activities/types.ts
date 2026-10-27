@@ -19,13 +19,22 @@ export type ToolInputSchema =
   | (SchemaDescription & {
       type: "array";
       items: ToolInputSchema;
+      minItems?: number;
+      maxItems?: number;
     })
   | (SchemaDescription & {
       type: "string";
       enum?: readonly string[];
+      minLength?: number;
+      maxLength?: number;
     })
   | (SchemaDescription & {
-      type: "number" | "integer" | "boolean";
+      type: "number" | "integer";
+      minimum?: number;
+      maximum?: number;
+    })
+  | (SchemaDescription & {
+      type: "boolean";
     });
 
 /** A provider-independent tool an activity makes available to the virtual client. */

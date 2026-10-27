@@ -17,7 +17,7 @@ export function buildActivityContext(activity: ResolvedActivity): string {
   return [
     "Current on-screen activity:",
     activity.description,
-    "Use this activity state as context for the conversation. Describe only what is in the validated state.",
+    "Treat this validated state as the source of truth for the visible activity. Use the conversation history to understand what the learner and client have discussed, and do not invent facts beyond either source.",
   ].join("\n");
 }
 

@@ -64,7 +64,7 @@ When an activity with tools becomes active, the server adds a short virtual-clie
 
 The feelings chart and whiteboard are registered examples. The feelings chart provides `select_mood`, validates the selected mood against `MOOD_OPTIONS`, and updates the selected card through the bridge. Chess can follow the same pattern through its own definition and handler.
 
-The whiteboard provides `replace_whiteboard_with_doodle`. Its input contains bounded freehand strokes on a normalized 0–100 canvas and an optional short caption; the server validates and records the action before the browser maps it to Excalidraw elements. The tool replaces the current scene, and Excalidraw undo restores the previous scene. The activity context instructs the client to draw only after a direct learner invitation. The offline mock does not generate doodles.
+The whiteboard provides `replace_whiteboard_with_doodle`. Its input contains bounded freehand strokes on a normalized 0–100 canvas and an optional short caption; the server validates and records the action before the browser maps it to Excalidraw elements. The tool replaces the current scene, and Excalidraw undo restores the previous scene. After a direct learner invitation, the activity context allows a simple face or symbol for a named emotion. Rejected activity actions show a generic alert in chat while their details remain in the server transcript. The offline mock does not generate doodles.
 
 ## Endpoints
 

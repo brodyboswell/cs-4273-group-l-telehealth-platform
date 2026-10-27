@@ -21,12 +21,12 @@ const definition: ActivityDefinition<WhiteboardState> = {
   label: "whiteboard",
   parseState: parseWhiteboardState,
   describeState: ({ hasContent }) =>
-    `The learner is using a shared whiteboard that ${hasContent ? "already has content" : "is blank"}. You may draw only after the learner directly asks you or agrees to draw. The doodle tool replaces the entire board, including any learner marks. Draw only events the client has already described; do not invent details.`,
+    `The learner is using a shared whiteboard that ${hasContent ? "already has content" : "is blank"}. You may draw only after the learner directly asks you or agrees to draw. When invited, call the doodle tool in the same reply instead of only saying that you will draw. The tool replaces the entire board, including any learner marks. Draw an event the client has described or an emotion the learner named; do not invent story details. For a named emotion, a simple expressive face or symbol is enough, even without a specific event. Always provide at least one stroke with at least two points.`,
   tools: [
     {
       name: "replace_whiteboard_with_doodle",
       description:
-        "After the learner directly asks you or agrees to draw, replace the whole whiteboard with a simple first-person doodle of an event you have already described. Use normalized integer coordinates from 0 to 100. Include 1 to 16 strokes, at least 2 points per stroke, no more than 192 points total, and an optional caption of at most 80 characters. Colors must come from the provided palette.",
+        "When the learner directly asks you or agrees to draw, call this tool in the same reply and replace the whole whiteboard with a simple first-person doodle. Represent an event you described or an emotion the learner named; for a named emotion, a simple face or symbol is enough. Do not ask for more detail when a feeling has been named. Use normalized integer coordinates from 0 to 100. Include at least 1 stroke and 2 points per stroke, no more than 16 strokes or 192 points total, and an optional caption of at most 80 characters. Colors must come from the provided palette.",
       inputSchema: {
         type: "object",
         properties: {
@@ -34,6 +34,8 @@ const definition: ActivityDefinition<WhiteboardState> = {
             type: "array",
             description:
               "One to 16 freehand strokes with at least 2 points each and at most 192 points total.",
+            minItems: 1,
+            maxItems: 16,
             items: {
               type: "object",
               properties: {
@@ -41,11 +43,13 @@ const definition: ActivityDefinition<WhiteboardState> = {
                   type: "array",
                   description:
                     "Ordered points on a normalized 0–100 canvas; each coordinate is an integer.",
+                  minItems: 2,
+                  maxItems: 192,
                   items: {
                     type: "object",
                     properties: {
-                      x: { type: "integer" },
-                      y: { type: "integer" },
+                      x: { type: "integer", minimum: 0, maximum: 100 },
+                      y: { type: "integer", minimum: 0, maximum: 100 },
                     },
                     required: ["x", "y"],
                     additionalProperties: false,
@@ -65,6 +69,8 @@ const definition: ActivityDefinition<WhiteboardState> = {
           caption: {
             type: "string",
             description: "Optional short caption, at most 80 characters.",
+            minLength: 1,
+            maxLength: 80,
           },
         },
         required: ["strokes"],

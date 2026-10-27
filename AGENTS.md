@@ -1,5 +1,5 @@
 # AGENTS.md
-> Last updated: 2026-10-26
+> Last updated: 2026-10-27
 
 ## Project Overview
 
@@ -117,6 +117,14 @@ public/                      # Static images and avatars
 ## Decisions & Gotchas Log
 
 *Append-only. Add new entries at the top.*
+
+---
+
+**2026-10-27 — Reject empty doodles clearly and use conversation context**
+Context: A provider returned “Let me draw that for you” with an empty or missing stroke list, which the server correctly rejected before dispatch. The transcript hid system rejection entries from the learner, so the board appeared to ignore the request.
+Decision: Add explicit array and coordinate bounds to the shared tool schema, instruct the client to draw a simple face or symbol when the learner names an emotion, clarify that conversation history supplies shared context, and show a generic learner-facing alert for rejected activity actions.
+Rationale: Keep malformed model output from mutating Excalidraw while avoiding silent failures when a tool action is rejected.
+Gotcha: Rejections remain server-logged without storing the raw invalid tool payload; the alert does not expose provider output or internal validation details.
 
 ---
 

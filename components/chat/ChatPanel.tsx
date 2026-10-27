@@ -187,6 +187,15 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
         throw new Error("Invalid chat response");
 
       setEntries(data.transcript.entries);
+      const rejectedActivityAction = data.transcript.entries.some(
+        (entry) =>
+          entry.seq > lastSeq &&
+          entry.speaker === "system" &&
+          entry.text.startsWith("Rejected activity tool call"),
+      );
+      if (rejectedActivityAction)
+        setError("The client couldn't complete the activity action. Ask them to try again.");
+
       const actions = data.transcript.entries
         .filter(
           (entry) =>
