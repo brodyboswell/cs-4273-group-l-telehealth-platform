@@ -21,19 +21,19 @@ const definition: ActivityDefinition<WhiteboardState> = {
   label: "whiteboard",
   parseState: parseWhiteboardState,
   describeState: ({ hasContent }) =>
-    `The learner is using a shared whiteboard that ${hasContent ? "already has content" : "is blank"}. You may draw only after the learner directly asks you or agrees to draw. When invited, call the doodle tool in the same reply instead of only saying that you will draw. The tool replaces the entire board, including any learner marks. Draw an event the client has described or an emotion the learner named; do not invent story details. For a named emotion, a simple expressive face or symbol is enough, even without a specific event. Always provide at least one stroke with at least two points.`,
+    `The learner is using a shared whiteboard that ${hasContent ? "already has content" : "is blank"}. You may draw only after the learner directly asks you or agrees to draw. When invited, plan a rudimentary but recognizable composition, then call the doodle tool in the same reply instead of only saying that you will draw. Use an event the client has described or an emotion the learner named; for an emotion, a simple expressive face or symbol is enough. Build the image from visual parts such as circles, squares, lines, and dots. The tool accepts stroke paths: use several sampled points for curves, closed paths for circles or polygons, and tiny loops or short marks for dots. Choose as many strokes and points as the drawing needs, within the tool's input limits. The tool replaces the entire board, including any learner marks. Do not invent story details.`,
   tools: [
     {
       name: "replace_whiteboard_with_doodle",
       description:
-        "When the learner directly asks you or agrees to draw, call this tool in the same reply and replace the whole whiteboard with a simple first-person doodle. Represent an event you described or an emotion the learner named; for a named emotion, a simple face or symbol is enough. Do not ask for more detail when a feeling has been named. Use normalized integer coordinates from 0 to 100. Include at least 1 stroke and 2 points per stroke, no more than 16 strokes or 192 points total, and an optional caption of at most 80 characters. Colors must come from the provided palette.",
+        "When the learner directly asks you or agrees to draw, plan a rudimentary but recognizable doodle, then call this tool in the same reply and replace the whole whiteboard. Choose simple visual parts that express the event or named emotion, such as circles, squares, lines, and dots. Encode each part as one or more stroke paths: use several sampled points to make curves, close the path for circles and polygons, and use a tiny loop or short mark for a dot. Choose as many strokes and points as needed to express the image at a rudimentary level, within the input limits; do not reduce curved parts to straight segments. Draw only from events or emotions already discussed, and do not invent story details. Use normalized integer coordinates from 0 to 100. You may include a short caption. Colors must come from the provided palette.",
       inputSchema: {
         type: "object",
         properties: {
           strokes: {
             type: "array",
             description:
-              "One to 16 freehand strokes with at least 2 points each and at most 192 points total.",
+              "Freehand paths that combine into the complete doodle; use as many as the composition needs.",
             minItems: 1,
             maxItems: 16,
             items: {
@@ -42,7 +42,7 @@ const definition: ActivityDefinition<WhiteboardState> = {
                 points: {
                   type: "array",
                   description:
-                    "Ordered points on a normalized 0–100 canvas; each coordinate is an integer.",
+                    "Ordered integer coordinates from 0 to 100 along the path. Include intermediate points for curves and repeat the first point to close circles or polygons.",
                   minItems: 2,
                   maxItems: 192,
                   items: {
