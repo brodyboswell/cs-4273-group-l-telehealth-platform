@@ -4,13 +4,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChessPiece } from "./ChessPiece";
 import { Chess, type Square, type PieceSymbol } from "chess.js";
 import {
+  isChessToolInputForPosition,
   isMoveInLegalList,
-  parseChessMoveAction,
+  parseChessMove,
   type ChessColor,
   type ChessMove,
   type ChessPromotion,
 } from "@/lib/chess/chessTypes";
-import { requestMockAgentChessMove } from "@/lib/chess/mockAgent";
+import type { ActivityAction } from "@/lib/activities/types";
+import {
+  useActivityBridge,
+  useActivityTools,
+} from "@/components/session/ActivityBridge";
 
 const FILES = "abcdefgh".split("");
 const RANKS = [8, 7, 6, 5, 4, 3, 2, 1] as const;
@@ -34,16 +39,17 @@ function getLegalChessMoves(game: Chess): ChessMove[] {
 }
 
 export function ChessBoard() {
-  // Apply moves only after the human or mock client has selected a legal move.
+  const activityBridge = useActivityBridge();
   const [position, setPosition] = useState(() => ({ game: new Chess() }));
   const { game } = position;
   const refreshPosition = useCallback(() => setPosition({ game }), [game]);
   const [learnerColor, setLearnerColor] = useState<ChessColor>("w");
   const agentColor: ChessColor = learnerColor === "w" ? "b" : "w";
+  const [gameId, setGameId] = useState(() => crypto.randomUUID());
   const [isAgentThinking, setIsAgentThinking] = useState(false);
-  const [agentMessage, setAgentMessage] = useState("");
   const [agentError, setAgentError] = useState<string | null>(null);
-  const [requestVersion, setRequestVersion] = useState(0);
+  const [turnEpoch, setTurnEpoch] = useState(0);
+  const [retryVersion, setRetryVersion] = useState(0);
   const lastRequestKey = useRef<string | null>(null);
   const mounted = useRef(false);
   const [selected, setSelected] = useState<Square | null>(null);
@@ -95,6 +101,27 @@ export function ChessBoard() {
       gameOver: game.isGameOver(),
     };
   }, [position]);
+  const moveHistory = useMemo(
+    () =>
+      position.game.history({ verbose: true }).map((move) => ({
+        from: move.from,
+        to: move.to,
+        ...(move.promotion
+          ? { promotion: move.promotion as ChessPromotion }
+          : {}),
+      })),
+    [position],
+  );
+  const activityState = useMemo(
+    () => ({
+      gameId,
+      turnEpoch,
+      fen: position.game.fen(),
+      moveHistory,
+      learnerColor,
+    }),
+    [gameId, learnerColor, moveHistory, position, turnEpoch],
+  );
 
   const applyMove = useCallback(
     (to: Square, promotionPiece: ChessPromotion | undefined, from: Square) => {
@@ -119,11 +146,57 @@ export function ChessBoard() {
     ) => {
       if (!from) return;
       applyMove(to, promotionPiece, from);
-      setAgentMessage("");
       setAgentError(null);
+      setTurnEpoch((epoch) => epoch + 1);
     },
     [applyMove, selected],
   );
+
+  const handleActivityAction = useCallback(
+    (action: ActivityAction) => {
+      if (action.activityId !== "chess" || action.tool !== "play_chess_move")
+        return;
+      if (
+        typeof action.input !== "object" ||
+        action.input === null ||
+        Array.isArray(action.input)
+      )
+        return;
+
+      const input = action.input as Record<string, unknown>;
+      if (
+        !isChessToolInputForPosition(input, {
+          gameId,
+          turnEpoch,
+          fen: game.fen(),
+        })
+      )
+        return;
+
+      let move: ChessMove;
+      try {
+        move = parseChessMove(input.move);
+      } catch {
+        setAgentError("The virtual client returned an invalid chess move.");
+        return;
+      }
+      const movingPiece = game.get(move.from);
+      if (
+        game.turn() !== agentColor ||
+        movingPiece?.color !== agentColor ||
+        !isMoveInLegalList(move, getLegalChessMoves(game))
+      ) {
+        setAgentError("The virtual client’s move is no longer legal here.");
+        return;
+      }
+
+      applyMove(move.to, move.promotion, move.from);
+      setAgentError(null);
+    },
+    [agentColor, applyMove, game, gameId, turnEpoch],
+  );
+
+  useActivityTools("chess", activityState, handleActivityAction);
 
   useEffect(() => {
     mounted.current = true;
@@ -133,58 +206,48 @@ export function ChessBoard() {
   }, []);
 
   useEffect(() => {
-    const fen = game.fen();
-    const isAgentTurn = game.turn() === agentColor;
-    if (gameOver || !isAgentTurn) return;
+    if (gameOver || game.turn() !== agentColor || isAgentThinking) return;
+    const requestId = `${gameId}-${turnEpoch}`;
+    if (lastRequestKey.current === requestId) return;
 
-    // This key prevents duplicate requests during React Strict Mode effect replay.
-    const requestKey = `${fen}|${agentColor}|${requestVersion}`;
-    if (lastRequestKey.current === requestKey) return;
-    lastRequestKey.current = requestKey;
+    // Let the persistent chat register its turn handler before an opening move.
+    const timer = window.setTimeout(() => {
+      if (lastRequestKey.current === requestId) return;
+      lastRequestKey.current = requestId;
+      setIsAgentThinking(true);
+      setAgentError(null);
+      const latestMove = moveHistory.at(-1);
+      const event =
+        moveHistory.length === 0
+          ? { type: "opening" }
+          : { type: "learner_move", input: { move: latestMove } };
 
-    const request = {
-      fen,
-      moveHistory: game.history(),
-      agentColor,
-      legalMoves: getLegalChessMoves(game),
-    };
-    setIsAgentThinking(true);
-    setAgentError(null);
-
-    void (async () => {
-      try {
-        const action = parseChessMoveAction(
-          await requestMockAgentChessMove(request),
-        );
-        if (!mounted.current) return;
-
-        if (game.fen() !== request.fen || game.turn() !== agentColor) {
-          throw new Error("The board changed before the client move arrived.");
-        }
-
-        const movingPiece = game.get(action.move.from);
-        const currentLegalMoves = getLegalChessMoves(game);
-        if (
-          movingPiece?.color !== agentColor ||
-          !isMoveInLegalList(action.move, currentLegalMoves)
-        ) {
-          throw new Error("AI Bot returned a move that is not legal here.");
-        }
-
-        applyMove(action.move.to, action.move.promotion, action.move.from);
-        setAgentMessage(action.message);
-      } catch (requestError) {
-        if (!mounted.current) return;
-        setAgentError(
-          requestError instanceof Error
-            ? requestError.message
-            : "AI Bot could not choose a chess move.",
-        );
-      } finally {
-        if (mounted.current) setIsAgentThinking(false);
-      }
-    })();
-  }, [agentColor, applyMove, game, gameOver, position, requestVersion]);
+      void activityBridge
+        .requestTurn({ requestId, event })
+        .catch((requestError: unknown) => {
+          if (!mounted.current) return;
+          setAgentError(
+            requestError instanceof Error
+              ? requestError.message
+              : "The virtual client could not choose a chess move.",
+          );
+        })
+        .finally(() => {
+          if (mounted.current) setIsAgentThinking(false);
+        });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [
+    activityBridge,
+    agentColor,
+    game,
+    gameId,
+    gameOver,
+    isAgentThinking,
+    moveHistory,
+    retryVersion,
+    turnEpoch,
+  ]);
 
   function selectSquare(square: Square) {
     if (gameOver || promotion || isAgentThinking || game.turn() === agentColor)
@@ -223,22 +286,21 @@ export function ChessBoard() {
     setSelected(null);
     setPromotion(null);
     setMessage("");
-    setAgentMessage("");
     setAgentError(null);
-    setRequestVersion((version) => version + 1);
+    setTurnEpoch((epoch) => epoch + 1);
   }
 
   function startNewGame(nextLearnerColor = learnerColor) {
     if (isAgentThinking) return;
     setLearnerColor(nextLearnerColor);
+    setGameId(crypto.randomUUID());
     game.reset();
     refreshPosition();
     setSelected(null);
     setPromotion(null);
     setMessage("");
-    setAgentMessage("");
     setAgentError(null);
-    setRequestVersion((version) => version + 1);
+    setTurnEpoch((epoch) => epoch + 1);
   }
 
   return (
@@ -429,16 +491,7 @@ export function ChessBoard() {
         </p>
         {isAgentThinking && (
           <p className="mt-2 text-sm text-charcoal/70" role="status">
-            AI Bot is choosing a move…
-          </p>
-        )}
-        {agentMessage && !isAgentThinking && (
-          <p
-            className="mt-2 rounded-panel bg-sage/10 px-3 py-2 text-sm text-charcoal"
-            aria-live="polite"
-          >
-            <span className="font-semibold">AI Bot: </span>
-            {agentMessage}
+            The virtual client is choosing a move…
           </p>
         )}
         {agentError && (
@@ -451,7 +504,8 @@ export function ChessBoard() {
               type="button"
               onClick={() => {
                 setAgentError(null);
-                setRequestVersion((version) => version + 1);
+                lastRequestKey.current = null;
+                setRetryVersion((version) => version + 1);
               }}
               disabled={isAgentThinking}
               className="mt-2 font-semibold underline disabled:opacity-50"

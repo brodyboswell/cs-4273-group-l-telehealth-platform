@@ -3,6 +3,7 @@ import { after, before, describe, it } from "node:test";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Chess } from "chess.js";
 import { POST } from "../app/api/chat/route";
 import { GET as getTranscript } from "../app/api/transcripts/[sessionId]/route";
 import { GET as getTranscripts } from "../app/api/transcripts/route";
@@ -251,127 +252,310 @@ describe("chat HTTP endpoints", () => {
     );
   });
 
-  it("keeps the offline mock from drawing without a configured provider", async () => {
-    const response = await post({
-      sessionId: "whiteboard-offline-session",
-      message: "Hi, how was your day?",
-      activity: { activityId: "whiteboard", state: { hasContent: false } },
-    });
-    assert.equal(response.status, 200);
-    const data = await response.json();
-    assert.equal(data.reply.model, "mock:offline");
-    assert.deepEqual(data.reply.actions ?? [], []);
-    assert.deepEqual(
-      data.transcript.entries.find(
-        (entry: { activityNotice?: unknown }) => entry.activityNotice,
-      )?.activityNotice.toolNames,
-      ["replace_whiteboard_with_doodle"],
-    );
-  });
-
-  it("records valid doodles and audits rejected whiteboard tool calls", async (context) => {
+  it("uses a validated feelings rationale when the provider returns only a tool call", async (context) => {
     const previousProvider = process.env.LLM_PROVIDER;
-    const previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
-    const doodle = {
-      strokes: [{ points: [{ x: 10, y: 20 }, { x: 70, y: 80 }] }],
-      caption: "The bus was late",
-    };
-    const providerReplies = [
-      {
+    const previousOpenAiKey = process.env.OPENAI_API_KEY;
+    context.mock.method(console, "error", () => undefined);
+    context.mock.method(globalThis, "fetch", async () =>
+      Response.json({
         model: "test-model",
-        content: [
-          { type: "text", text: "It was a really rough bus ride." },
+        choices: [
           {
-            type: "tool_use",
-            name: "replace_whiteboard_with_doodle",
-            input: doodle,
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  type: "function",
+                  function: {
+                    name: "select_mood",
+                    arguments: JSON.stringify({
+                      moodId: "worried",
+                      rationale: "I feel worried because a lot is on my mind.",
+                    }),
+                  },
+                },
+              ],
+            },
           },
         ],
-      },
-      {
-        model: "test-model",
-        content: [
-          {
-            type: "tool_use",
-            name: "replace_whiteboard_with_doodle",
-            input: { strokes: [] },
-          },
-        ],
-      },
-    ];
-    let requestBody: Record<string, unknown> | undefined;
-
-    process.env.LLM_PROVIDER = "anthropic";
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    context.mock.method(
-      globalThis,
-      "fetch",
-      async (
-        _input: Parameters<typeof fetch>[0],
-        init?: Parameters<typeof fetch>[1],
-      ) => {
-        requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-        return Response.json(providerReplies.shift());
-      },
+      }),
     );
 
     try {
-      const activity = {
-        activityId: "whiteboard",
-        state: { hasContent: true },
-      };
-      const accepted = await post({
-        sessionId: "whiteboard-tool-session",
-        message: "Can you draw what happened?",
-        activity,
+      process.env.LLM_PROVIDER = "openai";
+      process.env.OPENAI_API_KEY = "test-key";
+      const response = await post({
+        sessionId: "feelings-tool-only",
+        message: "Can you show how you are feeling?",
+        activity: {
+          activityId: "feelings",
+          state: { selectedMoodId: null },
+        },
       });
-      assert.equal(accepted.status, 200);
-      const acceptedData = await accepted.json();
-      assert.deepEqual(acceptedData.reply.actions, [
+
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.equal(
+        data.reply.text,
+        "I feel worried because a lot is on my mind.",
+      );
+      assert.deepEqual(data.reply.actions, [
         {
-          activityId: "whiteboard",
-          tool: "replace_whiteboard_with_doodle",
-          input: doodle,
+          activityId: "feelings",
+          tool: "select_mood",
+          input: {
+            type: "select_mood",
+            moodId: "worried",
+            rationale: "I feel worried because a lot is on my mind.",
+          },
         },
       ]);
-      assert.deepEqual(acceptedData.transcript.entries.at(-1).actions, [
-        acceptedData.reply.actions[0],
-      ]);
-      const body = requestBody as {
-        system: string;
-        tools: Array<{ name: string }>;
-      };
-      assert.match(body.system, /directly asks/);
-      assert.match(body.system, /replaces the entire board/);
-      assert.match(body.system, /conversation history/);
-      assert.match(body.system, /simple expressive face or symbol/);
-      assert.deepEqual(
-        body.tools.map(({ name }) => name),
-        ["replace_whiteboard_with_doodle"],
-      );
+    } finally {
+      if (previousProvider === undefined) delete process.env.LLM_PROVIDER;
+      else process.env.LLM_PROVIDER = previousProvider;
+      if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previousOpenAiKey;
+    }
+  });
 
-      const rejected = await post({
-        sessionId: "whiteboard-tool-session",
-        message: "Please draw that again.",
+  it("runs an idempotent chess client turn and logs the learner move separately from speech", async () => {
+    const game = new Chess();
+    game.move({ from: "e2", to: "e4" });
+    const gameId = "chess-api-game";
+    const requestId = `${gameId}-1`;
+    const activity = {
+      activityId: "chess",
+      state: {
+        gameId,
+        turnEpoch: 1,
+        fen: game.fen(),
+        moveHistory: game.history({ verbose: true }).map((move) => ({
+          from: move.from,
+          to: move.to,
+          ...(move.promotion ? { promotion: move.promotion } : {}),
+        })),
+        learnerColor: "w",
+      },
+    };
+    const request = {
+      sessionId: "chess-turn-session",
+      activityTurn: {
         activity,
+        requestId,
+        event: {
+          type: "learner_move",
+          input: { move: { from: "e2", to: "e4" } },
+        },
+      },
+    };
+
+    const [first, repeated] = await Promise.all([post(request), post(request)]);
+    assert.equal(first.status, 200);
+    const firstData = await first.json();
+    assert.equal(firstData.activityEvent.speaker, "activity");
+    assert.equal(firstData.activityEvent.activityEvent.actor, "learner");
+    assert.equal(firstData.activityEvent.text, "The learner played e2e4. It is your turn to move.");
+    assert.equal(firstData.reply.activityTurnId, requestId);
+    assert.equal(firstData.reply.actions.length, 1);
+    assert.equal(firstData.reply.actions[0].tool, "play_chess_move");
+    assert.equal(firstData.reply.actions[0].input.gameId, gameId);
+    assert.equal(firstData.reply.actions[0].input.turnEpoch, 1);
+    assert.equal(firstData.reply.actions[0].input.fen, game.fen());
+    assert.equal(
+      firstData.reply.text,
+      firstData.reply.actions[0].input.spokenText,
+    );
+    assert.equal(
+      firstData.transcript.entries.filter((entry: { speaker: string }) => entry.speaker === "learner").length,
+      0,
+    );
+
+    const repeatedData = await repeated.json();
+    assert.equal(repeatedData.reply.seq, firstData.reply.seq);
+    assert.equal(repeatedData.transcript.entries.length, firstData.transcript.entries.length);
+
+    const invalid = await post({
+      ...request,
+      sessionId: "invalid-chess-turn",
+      activityTurn: {
+        ...request.activityTurn,
+        event: { type: "opening" },
+      },
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal(await readTranscript("invalid-chess-turn"), null);
+  });
+
+  it("uses the move-derived chess line instead of contradictory provider text", async (context) => {
+    const previousProvider = process.env.LLM_PROVIDER;
+    const previousOpenAiKey = process.env.OPENAI_API_KEY;
+    const game = new Chess();
+    game.move({ from: "e2", to: "e4" });
+    game.move({ from: "f7", to: "f5" });
+    const gameId = "chess-speech-game";
+    context.mock.method(globalThis, "fetch", async () =>
+      Response.json({
+        model: "test-model",
+        choices: [
+          {
+            message: {
+              content: "I'm gonna take your pawn.",
+              tool_calls: [
+                {
+                  type: "function",
+                  function: {
+                    name: "play_chess_move",
+                    arguments: JSON.stringify({ move: "e4e5" }),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+
+    try {
+      process.env.LLM_PROVIDER = "openai";
+      process.env.OPENAI_API_KEY = "test-key";
+      const response = await post({
+        sessionId: "chess-speech-session",
+        activityTurn: {
+          activity: {
+            activityId: "chess",
+            state: {
+              gameId,
+              turnEpoch: 2,
+              fen: game.fen(),
+              moveHistory: game.history({ verbose: true }).map((move) => ({
+                from: move.from,
+                to: move.to,
+                ...(move.promotion ? { promotion: move.promotion } : {}),
+              })),
+              learnerColor: "b",
+            },
+          },
+          requestId: `${gameId}-2`,
+          event: {
+            type: "learner_move",
+            input: { move: { from: "f7", to: "f5" } },
+          },
+        },
       });
-      assert.equal(rejected.status, 200);
-      const rejectedData = await rejected.json();
-      assert.equal(rejectedData.reply.actions, undefined);
-      assert.ok(
-        rejectedData.transcript.entries.some(
-          (entry: { speaker: string; text: string }) =>
-            entry.speaker === "system" &&
-            entry.text.includes("Rejected activity tool call") &&
-            entry.text.includes("at least one stroke"),
-        ),
+
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.deepEqual(data.reply.actions[0].input.move, {
+        from: "e4",
+        to: "e5",
+      });
+      assert.equal(
+        data.reply.actions[0].input.spokenText,
+        "I move my pawn from e4 to e5.",
+      );
+      assert.equal(data.reply.text, data.reply.actions[0].input.spokenText);
+      assert.notEqual(data.reply.text, "I'm gonna take your pawn.");
+    } finally {
+      if (previousProvider === undefined) delete process.env.LLM_PROVIDER;
+      else process.env.LLM_PROVIDER = previousProvider;
+      if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previousOpenAiKey;
+    }
+  });
+
+  it("plays the client opening move when the learner chooses Black", async () => {
+    const game = new Chess();
+    const gameId = "black-chess-game";
+    const response = await post({
+      sessionId: "black-chess-session",
+      activityTurn: {
+        activity: {
+          activityId: "chess",
+          state: {
+            gameId,
+            turnEpoch: 0,
+            fen: game.fen(),
+            moveHistory: [],
+            learnerColor: "b",
+          },
+        },
+        requestId: `${gameId}-0`,
+        event: { type: "opening" },
+      },
+    });
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.equal(data.activityEvent.activityEvent.actor, "platform");
+    assert.equal(data.reply.actions.length, 1);
+    assert.equal(data.reply.actions[0].tool, "play_chess_move");
+    const input = data.reply.actions[0].input;
+    assert.equal(input.gameId, gameId);
+    assert.equal(input.turnEpoch, 0);
+    assert.equal(input.fen, game.fen());
+    assert.equal(game.move(input.move).color, "w");
+    assert.equal(data.reply.activityTurnId, `${gameId}-0`);
+  });
+
+  it("retries a failed chess turn without duplicating the activity event", async (context) => {
+    const previousProvider = process.env.LLM_PROVIDER;
+    const previousOpenAiKey = process.env.OPENAI_API_KEY;
+    context.mock.method(console, "error", () => undefined);
+    const game = new Chess();
+    game.move({ from: "d2", to: "d4" });
+    const gameId = "retry-chess-game";
+    const request = {
+      sessionId: "retry-chess-session",
+      activityTurn: {
+        activity: {
+          activityId: "chess",
+          state: {
+            gameId,
+            turnEpoch: 1,
+            fen: game.fen(),
+            moveHistory: [{ from: "d2", to: "d4" }],
+            learnerColor: "w",
+          },
+        },
+        requestId: `${gameId}-1`,
+        event: {
+          type: "learner_move",
+          input: { move: { from: "d2", to: "d4" } },
+        },
+      },
+    };
+
+    try {
+      process.env.LLM_PROVIDER = "openai";
+      process.env.OPENAI_API_KEY = "test-key";
+      context.mock.method(
+        globalThis,
+        "fetch",
+        async () =>
+          new Response(JSON.stringify({ error: { message: "rate limited" } }), {
+            status: 429,
+            headers: { "content-type": "application/json" },
+          }),
+      );
+      const failed = await post(request);
+      assert.equal(failed.status, 502);
+
+      process.env.LLM_PROVIDER = "mock";
+      const retried = await post(request);
+      assert.equal(retried.status, 200);
+      const data = await retried.json();
+      assert.equal(data.reply.activityTurnId, request.activityTurn.requestId);
+      assert.equal(
+        data.transcript.entries.filter(
+          (entry: { activityEvent?: { requestId?: string } }) =>
+            entry.activityEvent?.requestId === request.activityTurn.requestId,
+        ).length,
+        1,
       );
     } finally {
       if (previousProvider === undefined) delete process.env.LLM_PROVIDER;
       else process.env.LLM_PROVIDER = previousProvider;
-      if (previousAnthropicKey === undefined)
-        delete process.env.ANTHROPIC_API_KEY;
-      else process.env.ANTHROPIC_API_KEY = previousAnthropicKey;
+      if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = previousOpenAiKey;
     }
   });
 
@@ -506,6 +690,7 @@ describe("provider responses", () => {
       [],
       { LLM_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "test-key" },
       [moodTool],
+      "select_mood",
     );
 
     assert.equal(reply.text, "");
@@ -516,6 +701,10 @@ describe("provider responses", () => {
       (requestBody as { tools: Array<{ input_schema: unknown }> }).tools[0]
         .input_schema,
       moodTool.inputSchema,
+    );
+    assert.deepEqual(
+      (requestBody as { tool_choice: unknown }).tool_choice,
+      { type: "tool", name: "select_mood" },
     );
   });
 
@@ -555,6 +744,7 @@ describe("provider responses", () => {
       [],
       { LLM_PROVIDER: "openai", OPENAI_API_KEY: "test-key" },
       [moodTool],
+      "select_mood",
     );
 
     assert.equal(reply.text, "");
@@ -565,6 +755,10 @@ describe("provider responses", () => {
       (requestBody as { tools: Array<{ function: { parameters: unknown } }> })
         .tools[0].function.parameters,
       moodTool.inputSchema,
+    );
+    assert.deepEqual(
+      (requestBody as { tool_choice: unknown }).tool_choice,
+      { type: "function", function: { name: "select_mood" } },
     );
   });
 

@@ -1,5 +1,9 @@
 import type { Transcript } from "./types";
-import type { ActivityAction, ActivitySnapshot } from "@/lib/activities/types";
+import type {
+  ActivityAction,
+  ActivitySnapshot,
+  ActivityTurnEvent,
+} from "@/lib/activities/types";
 
 /** Shared browser/server input rules; keep this module free of server imports. */
 export const MAX_MESSAGE_LENGTH = 2000;
@@ -54,7 +58,8 @@ export function isTranscript(value: unknown): value is Transcript {
       entry.seq === index + 1 &&
       (entry.speaker === "learner" ||
         entry.speaker === "virtual_client" ||
-        entry.speaker === "system") &&
+        entry.speaker === "system" ||
+        entry.speaker === "activity") &&
       typeof entry.text === "string" &&
       isTimestamp(entry.timestamp) &&
       (entry.model === undefined || typeof entry.model === "string") &&
@@ -68,7 +73,28 @@ export function isTranscript(value: unknown): value is Transcript {
       (entry.actions === undefined ||
         (Array.isArray(entry.actions) && entry.actions.every(isActivityAction))) &&
       (entry.activityNotice === undefined ||
-        isActivityAvailabilityNotice(entry.activityNotice)),
+        isActivityAvailabilityNotice(entry.activityNotice)) &&
+      (entry.activityEvent === undefined ||
+        isActivityTurnEvent(entry.activityEvent)) &&
+      (entry.activityTurnId === undefined ||
+        (typeof entry.activityTurnId === "string" &&
+          entry.activityTurnId.length > 0 &&
+          entry.activityTurnId.length <= 120)),
+  );
+}
+
+function isActivityTurnEvent(value: unknown): value is ActivityTurnEvent {
+  return (
+    isRecord(value) &&
+    typeof value.activityId === "string" &&
+    value.activityId.length > 0 &&
+    typeof value.requestId === "string" &&
+    value.requestId.length > 0 &&
+    (value.actor === "learner" || value.actor === "platform") &&
+    typeof value.type === "string" &&
+    value.type.length > 0 &&
+    typeof value.text === "string" &&
+    isRecord(value.input)
   );
 }
 

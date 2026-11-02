@@ -78,15 +78,16 @@ export async function generateClientReply(
   history: ChatTurn[],
   env: ProviderEnvironment = process.env,
   tools: readonly LlmToolDefinition[] = [],
+  requiredToolName?: string,
 ): Promise<LlmReply> {
   const provider = resolveProvider(env);
   switch (provider) {
     case "anthropic":
-      return callAnthropic(systemPrompt, history, env, tools);
+      return callAnthropic(systemPrompt, history, env, tools, requiredToolName);
     case "openai":
-      return callOpenAI(systemPrompt, history, env, tools);
+      return callOpenAI(systemPrompt, history, env, tools, requiredToolName);
     case "mock":
-      return mockReply(history, tools);
+      return mockReply(history, tools, requiredToolName);
   }
 }
 
@@ -142,6 +143,7 @@ async function callAnthropic(
   history: ChatTurn[],
   env: ProviderEnvironment,
   tools: readonly LlmToolDefinition[],
+  requiredToolName?: string,
 ): Promise<LlmReply> {
   const apiKey = requireKey(env.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY");
   const model = env.ANTHROPIC_MODEL || "claude-haiku-4-5";
@@ -161,6 +163,9 @@ async function callAnthropic(
               input_schema: inputSchema,
             })),
           }
+        : {}),
+      ...(requiredToolName
+        ? { tool_choice: { type: "tool", name: requiredToolName } }
         : {}),
     },
   );
@@ -198,6 +203,7 @@ async function callOpenAI(
   history: ChatTurn[],
   env: ProviderEnvironment,
   tools: readonly LlmToolDefinition[],
+  requiredToolName?: string,
 ): Promise<LlmReply> {
   const apiKey = requireKey(env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const model = env.OPENAI_MODEL || "gpt-4o-mini";
@@ -214,6 +220,15 @@ async function callOpenAI(
               type: "function",
               function: { name, description, parameters: inputSchema },
             })),
+          }
+        : {}),
+      ...(requiredToolName
+        ? {
+            tool_choice: {
+              type: "function",
+              function: { name: requiredToolName },
+            },
+            parallel_tool_calls: false,
           }
         : {}),
     },
@@ -266,17 +281,27 @@ const MOCK_REPLIES = [
 function mockReply(
   history: ChatTurn[],
   tools: readonly LlmToolDefinition[],
+  requiredToolName?: string,
 ): LlmReply {
   const learnerTurns = history.filter((t) => t.role === "user").length;
   // History starts with a synthetic "session connected" user turn, so skip it.
   const text =
     MOCK_REPLIES[Math.max(0, learnerTurns - 2) % MOCK_REPLIES.length];
-  const mockTool = tools.find((tool) => tool.mockInput !== undefined);
+  const mockTool = requiredToolName
+    ? tools.find((tool) => tool.name === requiredToolName)
+    : tools.find((tool) => tool.mockInput !== undefined);
+  const mockInput = mockTool?.mockInput;
+  const mockText =
+    requiredToolName &&
+    isRecord(mockInput) &&
+    typeof mockInput.commentary === "string"
+      ? mockInput.commentary
+      : text;
   return {
-    text,
+    text: mockText,
     model: "mock:offline",
     toolCalls: mockTool
-      ? [{ name: mockTool.name, input: mockTool.mockInput }]
+      ? [{ name: mockTool.name, input: mockInput }]
       : [],
   };
 }
