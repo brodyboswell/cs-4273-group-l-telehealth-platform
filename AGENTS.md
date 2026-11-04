@@ -270,8 +270,11 @@ Rationale: The whiteboard should feel like an activity inside the telehealth pra
 - [x] Replace the local chess move mock with the shared LLM-backed activity tool.
 - [x] Add ordered chess activity events and client replies to the session transcript.
 - [x] Register chess interactions through the activity tool bridge.
-- [ ] Register whiteboard interactions through the activity tool bridge.
+- [x] Register whiteboard interactions through the activity tool bridge.
 - [x] Install `@excalidraw/excalidraw`.
 - [x] Add a client-only Excalidraw wrapper compatible with Next.js SSR.
 - [x] Replace the static whiteboard placeholder while preserving the session layout.
 - [x] Add the first whiteboard interaction/audit adapter after the editor renders.
+- [x] Validate whiteboard activity snapshots and reject unsupported fields.
+- [x] Add SVG doodle guidance to the whiteboard activity context.
+- [ ] Replace the stroke-based doodle tool with the validated SVG tool from the design document.

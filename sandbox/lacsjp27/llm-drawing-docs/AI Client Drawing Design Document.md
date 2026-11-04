@@ -219,7 +219,7 @@ TODO: Steps to implement
 - Add new activity validation in lib/actvities for the whiteboard (DONE)
 - TODO: how should the action handler handle actionDispatch's request for the whiteboard rendering? (DONE: it's already generalized, action given to whiteboard.tsx and the whiteboard component is in charge of rendering the svg)
 
-### Resolving the activity in route.ts
+### 6.1 Resolving the activity in route.ts
 
 **`components/activities/WhiteboardCanvas.tsx` — after the whiteboard state and handler are defined** **(Line 291)**
 
@@ -251,9 +251,9 @@ if (opeation.activity !== undefined)
 	activeActivity = activityRegistry.resolve(operation.activity)
 ```
 
-###  Whiteboard.ts
+###  6.2 Whiteboard.ts
 
-**1. Imports and data types**
+**6.2.1. Imports and data types**
 define the validated state and the shape of the tool inputs
 
 ```typescript
@@ -280,7 +280,7 @@ interface WhiteboardSvgAction {
 
 ```
 
-**2. Validate the activity state**
+**6.2.2. Validate the activity state**
 checks for valid activity snapshot, (info telling the app whether the whiteboard is open or not).
 
 ```typescript
@@ -295,7 +295,7 @@ function parseWhiteboardState(value: unknown): WhiteboardState {
 }
 ```
 
-**3. Give the model drawing guidance**
+**6.2.3. Give the model drawing guidance**
 The prompt for the LLM to adapt the doodle style when it creates the svg
 ```typescript
 const palette = WHITEBOARD_DOODLE_COLORS
@@ -315,7 +315,7 @@ const drawingGuidance = [
 ].join(" ");
 ```
 
-**4. Validate and sanitize the returned action**
+**6.2.4. Validate and sanitize the returned action**
 The activity parse checks the action shape and spoken line and the sanitizer canonicalizes the SVG before it is recorded or rendered.
 
 `createActivityRegistry()` registers the whiteboard definition; it does not build the prompt. The route resolves the active snapshot, then uses the resolved activity description to build `activityContext`. The activity tool schema is passed to `generateClientReply()` separately from `systemPrompt`.
@@ -349,7 +349,7 @@ function parseWhiteboardSvgAction(value: unknown): WhiteboardSvgAction {
 }
 ```
 
-**5. Define the model tool**
+**6.2.5. Define the model tool**
 The tool asks for structured SVG plus a short line the client can say. The line is not a part of the SVG.
 ```typescript
 const whiteboardSvgTool: ActivityTool<WhiteboardSvgAction> = {
@@ -384,7 +384,7 @@ const whiteboardSvgTool: ActivityTool<WhiteboardSvgAction> = {
 };
 ```
 
-**6. Define the model tool**
+**6.2.6. Define the model tool**
 This combines the state description and tool into the activity definition.
 ```typescript
 const definition: ActivityDefinition<WhiteboardState> = {
@@ -409,13 +409,13 @@ return typeof value === "object" && value !== null && !Array.isArray(value);}
 ```
 
 
-### sanitizeSvg.ts
+### 6.3 sanitizeSvg.ts
 
 Keeps the SVG validation separate from the activity definition. Accepts a limited set of static shapes, removes the model's root SVG attributes, and rejects text, unsupported elements, and unsafe attributes.
 
 
 
-### WhiteboardCanvas.tsx (rendering the svg)
+### 6.4 WhiteboardCanvas.tsx (rendering the svg)
 
 This section describes how `WhiteboardCanvas.tsx` applies the server-validated SVG action as an Excalidraw image. Line references below are to the current file before implementation.
 
