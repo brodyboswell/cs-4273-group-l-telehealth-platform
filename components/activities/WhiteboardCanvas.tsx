@@ -20,7 +20,6 @@ import {
   WHITEBOARD_DOODLE_COLORS,
 } from "@/lib/whiteboard/doodle";
 import { toExcalidrawDoodleSkeletons } from "@/lib/whiteboard/excalidrawDoodle";
-import "@excalidraw/excalidraw/index.css";
 
 export function preloadWhiteboardEditor() {
   return import("@excalidraw/excalidraw");
