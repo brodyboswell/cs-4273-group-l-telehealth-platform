@@ -1,5 +1,5 @@
 # AGENTS.md
-> Last updated: 2026-10-26
+> Last updated: 2026-11-05
 
 ## Project Overview
 
@@ -31,7 +31,7 @@ The repository also contains the original cross-stack unit-test exercises under 
 ## Architecture
 
 **High-level design:**
-The current app is a Next.js 15 App Router prototype using React 19 and Tailwind CSS. The shared practice shell owns one persistent chat panel and an activity bridge. The active activity registers a validated state snapshot and provider-neutral tool definitions; the server registry adds activity context to the LLM request, validates returned actions, and stores them in the transcript. The welcome room and activity routes render beside chat on larger screens; chat expands from a right-edge tab on narrow screens. The whiteboard uses a client-only Excalidraw editor. Future collaboration and audit persistence should remain separate from the canvas renderer so whiteboard actions can be associated with a telehealth session log.
+The current app is a Next.js 15 App Router prototype using React 19 and Tailwind CSS. The shared practice shell owns one persistent chat panel and an activity bridge. The active activity registers a validated state snapshot and provider-neutral tool definitions; the server registry adds activity context to the LLM request, validates returned actions, and stores them in the transcript. The welcome room and activity routes render beside chat on larger screens; chat expands from a right-edge tab on narrow screens. The whiteboard keeps Excalidraw for learner marks and exposes a bounded SVG action for the virtual client. The allow-list sanitizer and client SVG insertion remain deferred; the server fails closed until sanitization is implemented. Future collaboration and audit persistence should remain separate from the canvas renderer so whiteboard actions can be associated with a telehealth session log.
 
 ```
 [Practice room shell] -> [Activity route] -> [Whiteboard client editor]
@@ -118,6 +118,14 @@ public/                      # Static images and avatars
 
 *Append-only. Add new entries at the top.*
 
+**2026-11-05 — Define virtual-client whiteboard actions as bounded SVG**
+Context: The freehand stroke tool belonged to an earlier whiteboard design and did not match the SVG-based implementation plan.
+Decision: Register `replace_whiteboard_with_svg` with a bounded SVG string and short `spokenText`; keep the shared activity bridge active while Excalidraw loads. Leave the SVG sanitizer as a fail-closed placeholder and defer client-side SVG insertion to section 6.4.
+Rationale: Implements the activity contract and provider-facing schema without accepting or rendering untrusted SVG before the planned sanitizer exists.
+Gotcha: Valid SVG tool calls are rejected until section 6.3 is implemented; the learner can still use Excalidraw directly.
+
+---
+
 **2026-10-26 — Derive Chess speech from the validated move**
 Context: The client once said it would capture a pawn while its legal tool action advanced a pawn instead.
 Decision: Remove freeform commentary from the Chess tool. After validating the move against the replayed position, derive the spoken line from chess.js move metadata and prefer that line over provider prose.
@@ -137,6 +145,22 @@ Context: Chess used a local random-move mock while the feelings chart was the on
 Decision: Register chess as an activity with `play_chess_move`; reconstruct its position from legal move history and verify the FEN on the server; expose only the current legal move IDs; and request client turns through the shared chat bridge. Record nonverbal board events separately from learner speech, require one legal move on client turns, and use a minimum 400 ms visible think delay. The offline mock chooses the first legal option.
 Rationale: Keeps provider adapters activity-neutral, makes every selected move auditable, and prevents stale or illegal actions from changing the board.
 Gotcha: Each board turn carries a game ID and turn epoch for idempotency and stale-action checks. This does not add authentication or durable shared storage.
+
+---
+
+**2026-10-27 — Reject empty doodles clearly and use conversation context**
+Context: A provider returned “Let me draw that for you” with an empty or missing stroke list, which the server correctly rejected before dispatch. The transcript hid system rejection entries from the learner, so the board appeared to ignore the request.
+Decision: Add explicit array and coordinate bounds to the shared tool schema, instruct the client to draw a simple face or symbol when the learner names an emotion, clarify that conversation history supplies shared context, and show a generic learner-facing alert for rejected activity actions.
+Rationale: Keep malformed model output from mutating Excalidraw while avoiding silent failures when a tool action is rejected.
+Gotcha: Rejections remain server-logged without storing the raw invalid tool payload; the alert does not expose provider output or internal validation details.
+
+---
+
+**2026-10-26 — Route invited client doodles through the whiteboard activity tool**
+Context: Learners may invite the virtual client to draw a simple situation on the Excalidraw whiteboard, and the action needs to remain reviewable in the session transcript.
+Decision: Add `replace_whiteboard_with_doodle` with bounded normalized freehand strokes and an optional short caption. Validate the payload in the server activity registry, record accepted and rejected calls through the existing transcript flow, and apply accepted doodles to Excalidraw as one undoable scene replacement. The activity context instructs the client to draw only after a direct learner invitation; the offline mock does not produce doodles.
+Rationale: Keeps provider adapters activity-neutral, avoids passing raw Excalidraw data or images through the model, and lets the learner undo the replacement.
+Gotcha: The transcript stores the validated client doodle action, while learner-created board content and the complete canvas scene are not persisted or synchronized between participants.
 
 ---
 
@@ -254,8 +278,13 @@ Rationale: The whiteboard should feel like an activity inside the telehealth pra
 - [x] Replace the local chess move mock with the shared LLM-backed activity tool.
 - [x] Add ordered chess activity events and client replies to the session transcript.
 - [x] Register chess interactions through the activity tool bridge.
-- [ ] Register whiteboard interactions through the activity tool bridge.
+- [x] Register whiteboard interactions through the activity tool bridge.
 - [x] Install `@excalidraw/excalidraw`.
 - [x] Add a client-only Excalidraw wrapper compatible with Next.js SSR.
 - [x] Replace the static whiteboard placeholder while preserving the session layout.
-- [ ] Add the first whiteboard interaction/audit adapter after the editor renders.
+- [x] Add the first whiteboard interaction/audit adapter after the editor renders.
+- [x] Validate whiteboard activity snapshots and reject unsupported fields.
+- [x] Replace the stroke-based doodle tool with the bounded SVG action and spoken-text field.
+- [x] Add SVG drawing guidance and register the whiteboard through the activity bridge while the editor loads.
+- [ ] Implement the allow-list SVG sanitizer from section 6.3.
+- [ ] Render sanitized client SVG as an Excalidraw image from section 6.4.

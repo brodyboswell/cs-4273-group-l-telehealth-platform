@@ -165,6 +165,7 @@ img {
    its advanced tool chrome only within the children's whiteboard. */
 .kid-whiteboard .excalidraw .App-menu_top,
 .kid-whiteboard .excalidraw .App-toolbar--mobile,
+.kid-whiteboard .excalidraw .mobile-misc-tools-container,
 .kid-whiteboard .excalidraw .App-menu__left,
 .kid-whiteboard .excalidraw .HintViewer,
 .kid-whiteboard .excalidraw .layer-ui__wrapper__top-right,

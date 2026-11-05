@@ -40,12 +40,12 @@ Example request while the feelings chart is open:
 
 ```json
 {
-  "sessionId": "demo-session-1",
-  "message": "I don't know how to describe it.",
-  "activity": {
-    "activityId": "feelings",
-    "state": { "selectedMoodId": null }
-  }
+	"sessionId": "demo-session-1",
+	"message": "I don't know how to describe it.",
+	"activity": {
+		"activityId": "feelings",
+		"state": { "selectedMoodId": null }
+	}
 }
 ```
 
@@ -57,24 +57,24 @@ The board-triggered turn uses this request form after a learner move. `event` is
 
 ```json
 {
-  "sessionId": "demo-session-1",
-  "activityTurn": {
-    "activity": {
-      "activityId": "chess",
-      "state": {
-        "gameId": "chess-game-123",
-        "turnEpoch": 1,
-        "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
-        "moveHistory": [{ "from": "e2", "to": "e4" }],
-        "learnerColor": "w"
-      }
-    },
-    "requestId": "chess-game-123-1",
-    "event": {
-      "type": "learner_move",
-      "input": { "move": { "from": "e2", "to": "e4" } }
-    }
-  }
+	"sessionId": "demo-session-1",
+	"activityTurn": {
+		"activity": {
+			"activityId": "chess",
+			"state": {
+				"gameId": "chess-game-123",
+				"turnEpoch": 1,
+				"fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+				"moveHistory": [{ "from": "e2", "to": "e4" }],
+				"learnerColor": "w"
+			}
+		},
+		"requestId": "chess-game-123-1",
+		"event": {
+			"type": "learner_move",
+			"input": { "move": { "from": "e2", "to": "e4" } }
+		}
+	}
 }
 ```
 
@@ -89,16 +89,18 @@ When an activity with tools becomes active, the server adds a short virtual-clie
 3. In the activity component, call `useActivityTools(activityId, serializableState, onAction)`. Keep the state limited to the information the client needs to see and act on; apply only the action names and inputs that component understands.
 4. Add registry and chat API coverage for valid and invalid state/actions. Provider-specific chat code should not need activity-specific branches.
 
-The feelings chart provides `select_mood`, validates the selected mood against `MOOD_OPTIONS`, and updates the selected card through the bridge. Chess provides `play_chess_move`, derives legal options from replayed state, and requests automatic client turns through the same bridge and chat service.
+The feelings chart and whiteboard are registered examples. The feelings chart provides `select_mood`, validates the selected mood against `MOOD_OPTIONS`, and updates the selected card through the bridge. Chess can follow the same pattern through its own definition and handler.
+
+The whiteboard provides `replace_whiteboard_with_svg`. Its input contains a bounded SVG document and a short `spokenText` line. The server validates the action shape and size before recording it; the SVG sanitizer currently fails closed as a placeholder, and rendering the client SVG in Excalidraw is deferred. Learner-created marks remain local to the browser. Rejected activity actions show a generic alert in chat while their details remain in the server transcript.
 
 ## Endpoints
 
-| Method | Path | Purpose |
-|---|---|---|
-| POST | `/api/chat` | Learner chat body `{ "sessionId": "...", "message": "...", "activity?": { ... } }` → reply and transcript; or board-turn body `{ "sessionId": "...", "activityTurn": { "activity": { ... }, "requestId": "...", "event": { ... } } }` → activity event, required client tool action, and transcript |
-| GET | `/api/transcripts/:sessionId` | Transcript as JSON (creates the session and its opening line if it's new) |
-| GET | `/api/transcripts/:sessionId?format=txt` | Readable text transcript; add `&download=1` to download |
-| GET | `/api/transcripts` | List of all recorded sessions (newest first) |
+| Method | Path                                     | Purpose                                                                                                                                                                                                                                                                                             |
+| ------ | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/chat`                              | Learner chat body `{ "sessionId": "...", "message": "...", "activity?": { ... } }` → reply and transcript; or board-turn body `{ "sessionId": "...", "activityTurn": { "activity": { ... }, "requestId": "...", "event": { ... } } }` → activity event, required client tool action, and transcript |
+| GET    | `/api/transcripts/:sessionId`            | Transcript as JSON (creates the session and its opening line if it's new)                                                                                                                                                                                                                           |
+| GET    | `/api/transcripts/:sessionId?format=txt` | Readable text transcript; add `&download=1` to download                                                                                                                                                                                                                                             |
+| GET    | `/api/transcripts`                       | List of all recorded sessions (newest first)                                                                                                                                                                                                                                                        |
 
 Errors return `{ "error": "..." }` with status 400 (bad input), 413 (message > 2000 chars),
 500 (missing key / storage), 502 (provider error, e.g. bad key or quota), 504 (timeout).
@@ -117,20 +119,110 @@ Saved as `data/transcripts/<sessionId>.json` (change the folder with `TRANSCRIPT
 
 ```json
 {
-  "sessionId": "38b207a2-...",
-  "personaId": "alex-rapport-v1",
-  "personaName": "Alex",
-  "createdAt": "2026-09-28T17:18:25.506Z",
-  "updatedAt": "2026-09-28T17:18:25.684Z",
-  "entries": [
-    { "seq": 1, "speaker": "system", "text": "Session started with virtual client Alex (alex-rapport-v1).", "timestamp": "..." },
-    { "seq": 2, "speaker": "virtual_client", "text": "Hey. Um… my advisor said I should do this.", "timestamp": "...", "model": "scripted:opening-line" },
-    { "seq": 3, "speaker": "virtual_client", "text": "I can interact with the feelings chart while we talk.", "timestamp": "...", "activityNotice": { "activityId": "feelings", "toolNames": ["select_mood"] } },
-    { "seq": 4, "speaker": "learner", "text": "Hi Alex, thanks for coming in today.", "timestamp": "...", "activity": { "activityId": "feelings", "state": { "selectedMoodId": null } } },
-    { "seq": 5, "speaker": "virtual_client", "text": "I think I'm worried.", "timestamp": "...", "model": "anthropic:claude-haiku-4-5", "latencyMs": 812, "actions": [{ "activityId": "feelings", "tool": "select_mood", "input": { "type": "select_mood", "moodId": "worried", "rationale": "Something has been on my mind." } }] },
-    { "seq": 6, "speaker": "activity", "text": "The learner played e2e4. It is your turn to move.", "timestamp": "...", "activity": { "activityId": "chess", "state": { "gameId": "chess-game-123", "turnEpoch": 1, "fen": "...", "moveHistory": [{ "from": "e2", "to": "e4" }], "learnerColor": "w" } }, "activityEvent": { "activityId": "chess", "requestId": "chess-game-123-1", "actor": "learner", "type": "move", "text": "The learner played e2e4. It is your turn to move.", "input": { "move": { "from": "e2", "to": "e4" } } } },
-    { "seq": 7, "speaker": "virtual_client", "text": "I move my pawn from e7 to e5.", "timestamp": "...", "activityTurnId": "chess-game-123-1", "actions": [{ "activityId": "chess", "tool": "play_chess_move", "input": { "type": "play_chess_move", "move": { "from": "e7", "to": "e5" }, "spokenText": "I move my pawn from e7 to e5.", "gameId": "chess-game-123", "turnEpoch": 1, "fen": "..." } }] }
-  ]
+	"sessionId": "38b207a2-...",
+	"personaId": "alex-rapport-v1",
+	"personaName": "Alex",
+	"createdAt": "2026-09-28T17:18:25.506Z",
+	"updatedAt": "2026-09-28T17:18:25.684Z",
+	"entries": [
+		{
+			"seq": 1,
+			"speaker": "system",
+			"text": "Session started with virtual client Alex (alex-rapport-v1).",
+			"timestamp": "..."
+		},
+		{
+			"seq": 2,
+			"speaker": "virtual_client",
+			"text": "Hey. Um… my advisor said I should do this.",
+			"timestamp": "...",
+			"model": "scripted:opening-line"
+		},
+		{
+			"seq": 3,
+			"speaker": "virtual_client",
+			"text": "I can interact with the feelings chart while we talk.",
+			"timestamp": "...",
+			"activityNotice": {
+				"activityId": "feelings",
+				"toolNames": ["select_mood"]
+			}
+		},
+		{
+			"seq": 4,
+			"speaker": "learner",
+			"text": "Hi Alex, thanks for coming in today.",
+			"timestamp": "...",
+			"activity": {
+				"activityId": "feelings",
+				"state": { "selectedMoodId": null }
+			}
+		},
+		{
+			"seq": 5,
+			"speaker": "virtual_client",
+			"text": "I think I'm worried.",
+			"timestamp": "...",
+			"model": "anthropic:claude-haiku-4-5",
+			"latencyMs": 812,
+			"actions": [
+				{
+					"activityId": "feelings",
+					"tool": "select_mood",
+					"input": {
+						"type": "select_mood",
+						"moodId": "worried",
+						"rationale": "Something has been on my mind."
+					}
+				}
+			]
+		},
+		{
+			"seq": 6,
+			"speaker": "activity",
+			"text": "The learner played e2e4. It is your turn to move.",
+			"timestamp": "...",
+			"activity": {
+				"activityId": "chess",
+				"state": {
+					"gameId": "chess-game-123",
+					"turnEpoch": 1,
+					"fen": "...",
+					"moveHistory": [{ "from": "e2", "to": "e4" }],
+					"learnerColor": "w"
+				}
+			},
+			"activityEvent": {
+				"activityId": "chess",
+				"requestId": "chess-game-123-1",
+				"actor": "learner",
+				"type": "move",
+				"text": "The learner played e2e4. It is your turn to move.",
+				"input": { "move": { "from": "e2", "to": "e4" } }
+			}
+		},
+		{
+			"seq": 7,
+			"speaker": "virtual_client",
+			"text": "I move my pawn from e7 to e5.",
+			"timestamp": "...",
+			"activityTurnId": "chess-game-123-1",
+			"actions": [
+				{
+					"activityId": "chess",
+					"tool": "play_chess_move",
+					"input": {
+						"type": "play_chess_move",
+						"move": { "from": "e7", "to": "e5" },
+						"spokenText": "I move my pawn from e7 to e5.",
+						"gameId": "chess-game-123",
+						"turnEpoch": 1,
+						"fen": "..."
+					}
+				}
+			]
+		}
+	]
 }
 ```
 
