@@ -411,7 +411,7 @@ return typeof value === "object" && value !== null && !Array.isArray(value);}
 
 ### 6.3 sanitizeSvg.ts
 
-Keeps the SVG validation separate from the activity definition. Accepts a limited set of static shapes, removes the model's root SVG attributes, and rejects text, unsupported elements, and unsafe attributes.
+Keeps the SVG validation separate from the activity definition. Accepts a limited set of static shapes, removes the model's root SVG attributes, and rejects text, unsupported elements, and unsafe attribute
 
 
 

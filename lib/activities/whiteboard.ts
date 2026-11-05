@@ -1,10 +1,14 @@
-import { WHITEBOARD_DOODLE_COLORS } from '@/lib/whiteboard/doodle';
+import { WHITEBOARD_DOODLE_COLORS } from '@/lib/whiteboard/palette';
 import {
 	MAX_WHITEBOARD_SPOKEN_TEXT_LENGTH,
 	MAX_WHITEBOARD_SVG_LENGTH,
 	sanitizeWhiteboardSvg,
 } from '@/lib/whiteboard/sanitizeSvg';
-import { defineActivity, type ActivityDefinition, type ActivityTool } from './types';
+import {
+	defineActivity,
+	type ActivityDefinition,
+	type ActivityTool,
+} from './types';
 
 interface WhiteboardState {
 	hasContent: boolean;
@@ -40,31 +44,41 @@ const drawingGuidance = [
 	`Use colors from this palette: ${palette}.`,
 ].join(' ');
 
-function parseWhiteboardSvgAction(value: unknown): WhiteboardSvgAction {
-	if (!isRecord(value))
-		throw new Error('Expected a whiteboard SVG action.');
+/** Builds the action parser around the sanitizer used at the trust boundary. */
+export function createWhiteboardSvgActionParser(
+	sanitizeSvg: (svg: string) => string,
+) {
+	return function parseWhiteboardSvgAction(
+		value: unknown,
+	): WhiteboardSvgAction {
+		if (!isRecord(value)) throw new Error('Expected a whiteboard SVG action.');
 
-	if (Object.keys(value).some((key) => !['svg', 'spokenText'].includes(key)))
-		throw new Error('Whiteboard SVG action contains an unsupported field.');
+		if (Object.keys(value).some((key) => !['svg', 'spokenText'].includes(key)))
+			throw new Error('Whiteboard SVG action contains an unsupported field.');
 
-	if (typeof value.svg !== 'string' || !value.svg.trim())
-		throw new Error('The drawing must include an SVG document.');
+		if (typeof value.svg !== 'string' || !value.svg.trim())
+			throw new Error('The drawing must include an SVG document.');
 
-	if (value.svg.length > MAX_WHITEBOARD_SVG_LENGTH)
-		throw new Error('The generated SVG is too large. Try a simpler doodle.');
+		if (value.svg.length > MAX_WHITEBOARD_SVG_LENGTH)
+			throw new Error('The generated SVG is too large. Try a simpler doodle.');
 
-	if (
-		typeof value.spokenText !== 'string' ||
-		!value.spokenText.trim() ||
-		value.spokenText.trim().length > MAX_WHITEBOARD_SPOKEN_TEXT_LENGTH
-	)
-		throw new Error('The client drawing needs a short spoken description.');
+		if (
+			typeof value.spokenText !== 'string' ||
+			!value.spokenText.trim() ||
+			value.spokenText.trim().length > MAX_WHITEBOARD_SPOKEN_TEXT_LENGTH
+		)
+			throw new Error('The client drawing needs a short spoken description.');
 
-	return {
-		svg: sanitizeWhiteboardSvg(value.svg),
-		spokenText: value.spokenText.trim(),
+		return {
+			svg: sanitizeSvg(value.svg),
+			spokenText: value.spokenText.trim(),
+		};
 	};
 }
+
+const parseWhiteboardSvgAction = createWhiteboardSvgActionParser(
+	sanitizeWhiteboardSvg,
+);
 
 const whiteboardSvgTool: ActivityTool<WhiteboardSvgAction> = {
 	name: 'replace_whiteboard_with_svg',
@@ -86,7 +100,8 @@ const whiteboardSvgTool: ActivityTool<WhiteboardSvgAction> = {
 			},
 			spokenText: {
 				type: 'string',
-				description: 'A short first-person line the client can say about the doodle.',
+				description:
+					'A short first-person line the client can say about the doodle.',
 				minLength: 1,
 				maxLength: MAX_WHITEBOARD_SPOKEN_TEXT_LENGTH,
 			},
@@ -117,4 +132,3 @@ export const whiteboardActivity = defineActivity(definition);
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
-

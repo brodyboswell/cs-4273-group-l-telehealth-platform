@@ -1,227 +1,208 @@
-import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-import { dispatchActivityActions } from "../lib/activities/actionDispatch";
-import { activityRegistry } from "../lib/activities/catalog";
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { dispatchActivityActions } from '../lib/activities/actionDispatch';
+import { activityRegistry } from '../lib/activities/catalog';
 import {
-  ActivityRegistryError,
-  createActivityRegistry,
-} from "../lib/activities/registry";
-import { feelingsActivity } from "../lib/activities/feelings";
-import type { ActivityAction } from "../lib/activities/types";
+	ActivityRegistryError,
+	createActivityRegistry,
+} from '../lib/activities/registry';
+import { feelingsActivity } from '../lib/activities/feelings';
+import type { ActivityAction } from '../lib/activities/types';
 
-describe("activity registry", () => {
-  it("resolves known activity state and exposes its context and tools", () => {
-    const activity = activityRegistry.resolve({
-      activityId: "feelings",
-      state: { selectedMoodId: "worried" },
-    });
+describe('activity registry', () => {
+	it('resolves known activity state and exposes its context and tools', () => {
+		const activity = activityRegistry.resolve({
+			activityId: 'feelings',
+			state: { selectedMoodId: 'worried' },
+		});
 
-    assert.match(activity.description, /Currently selected: Worried/);
-    assert.deepEqual(
-      activity.tools.map((tool) => tool.name),
-      ["select_mood"],
-    );
-  });
+		assert.match(activity.description, /Currently selected: Worried/);
+		assert.deepEqual(
+			activity.tools.map((tool) => tool.name),
+			['select_mood'],
+		);
+	});
 
-  it("rejects unknown activity IDs and invalid activity state", () => {
-    assert.throws(
-      () =>
-        activityRegistry.resolve({
-          activityId: "unknown-tool",
-          state: {},
-        }),
-      ActivityRegistryError,
-    );
-    assert.throws(
-      () =>
-        activityRegistry.resolve({
-          activityId: "feelings",
-          state: { selectedMoodId: "not-a-feeling" },
-        }),
-      ActivityRegistryError,
-    );
-    assert.throws(
-      () =>
-        activityRegistry.resolve({
-          activityId: "feelings",
-          state: {},
-        }),
-      ActivityRegistryError,
-    );
-  });
+	it('rejects unknown activity IDs and invalid activity state', () => {
+		assert.throws(
+			() =>
+				activityRegistry.resolve({
+					activityId: 'unknown-tool',
+					state: {},
+				}),
+			ActivityRegistryError,
+		);
+		assert.throws(
+			() =>
+				activityRegistry.resolve({
+					activityId: 'feelings',
+					state: { selectedMoodId: 'not-a-feeling' },
+				}),
+			ActivityRegistryError,
+		);
+		assert.throws(
+			() =>
+				activityRegistry.resolve({
+					activityId: 'feelings',
+					state: {},
+				}),
+			ActivityRegistryError,
+		);
+	});
 
-  it("resolves whiteboard state and exposes a replacement doodle tool", () => {
-    const activity = activityRegistry.resolve({
-      activityId: "whiteboard",
-      state: { hasContent: true },
-    });
+	it('resolves whiteboard state and exposes the SVG drawing tool', () => {
+		const activity = activityRegistry.resolve({
+			activityId: 'whiteboard',
+			state: { hasContent: true },
+		});
 
-    assert.match(activity.description, /already has content/);
-    assert.match(activity.description, /directly asks/);
-    assert.match(activity.description, /emotion the learner named/);
-    assert.deepEqual(
-      activity.tools.map((tool) => tool.name),
-      ["replace_whiteboard_with_doodle"],
-    );
-    assert.equal(activity.tools[0]?.mockInput, undefined);
-    const schema = activity.tools[0]?.inputSchema;
-    assert.ok(schema?.type === "object");
-    const strokes = schema.properties.strokes;
-    assert.ok(strokes?.type === "array");
-    assert.equal(strokes.minItems, 1);
-    assert.equal(strokes.maxItems, 16);
-    const point = strokes.items;
-    assert.ok(point.type === "object");
-    const points = point.properties.points;
-    assert.ok(points?.type === "array");
-    assert.equal(points.minItems, 2);
-    assert.equal(points.maxItems, 192);
-    assert.ok(points.items.type === "object");
-    assert.deepEqual(points.items.properties.x, {
-      type: "integer",
-      minimum: 0,
-      maximum: 100,
-    });
-    assert.deepEqual(schema.properties.caption, {
-      type: "string",
-      description: "Optional short caption, at most 80 characters.",
-      minLength: 1,
-      maxLength: 80,
-    });
-  });
+		assert.match(activity.description, /already has content/);
+		assert.match(activity.description, /directly asks/);
+		assert.match(activity.description, /small, friendly SVG doodle/);
+		assert.deepEqual(
+			activity.tools.map((tool) => tool.name),
+			['replace_whiteboard_with_svg'],
+		);
+		assert.equal(activity.tools[0]?.mockInput, undefined);
+		const schema = activity.tools[0]?.inputSchema;
+		assert.ok(schema?.type === 'object');
+		assert.deepEqual(schema.properties.svg, {
+			type: 'string',
+			description: 'One complete, static SVG doodle document.',
+			minLength: 1,
+			maxLength: 12_000,
+		});
+		assert.deepEqual(schema.properties.spokenText, {
+			type: 'string',
+			description:
+				'A short first-person line the client can say about the doodle.',
+			minLength: 1,
+			maxLength: 180,
+		});
+	});
 
-  it("rejects invalid whiteboard snapshots", () => {
-    for (const state of [{}, { hasContent: "yes" }, { hasContent: true, count: 3 }])
-      assert.throws(
-        () => activityRegistry.resolve({ activityId: "whiteboard", state }),
-        ActivityRegistryError,
-      );
-  });
+	it('rejects invalid whiteboard snapshots', () => {
+		for (const state of [
+			{},
+			{ hasContent: 'yes' },
+			{ hasContent: true, count: 3 },
+		])
+			assert.throws(
+				() => activityRegistry.resolve({ activityId: 'whiteboard', state }),
+				ActivityRegistryError,
+			);
+	});
 
-  it("rejects duplicate tool names in an activity definition", () => {
-    const tool = feelingsActivity.tools[0];
-    assert.ok(tool);
+	it('rejects duplicate tool names in an activity definition', () => {
+		const tool = feelingsActivity.tools[0];
+		assert.ok(tool);
 
-    assert.throws(
-      () =>
-        createActivityRegistry([
-          {
-            ...feelingsActivity,
-            tools: [tool, tool],
-          },
-        ]),
-      ActivityRegistryError,
-    );
-  });
+		assert.throws(
+			() =>
+				createActivityRegistry([
+					{
+						...feelingsActivity,
+						tools: [tool, tool],
+					},
+				]),
+			ActivityRegistryError,
+		);
+	});
 
-  it("validates registered tool input before creating an action", () => {
-    assert.deepEqual(
-      activityRegistry.validateAction("feelings", "select_mood", {
-        moodId: "worried",
-        rationale: "I have a lot on my mind.",
-      }),
-      {
-        activityId: "feelings",
-        tool: "select_mood",
-        input: {
-          type: "select_mood",
-          moodId: "worried",
-          rationale: "I have a lot on my mind.",
-        },
-      },
-    );
-    assert.throws(
-      () =>
-        activityRegistry.validateAction("feelings", "select_mood", {
-          moodId: "invented",
-          rationale: "A feeling outside the chart.",
-        }),
-      ActivityRegistryError,
-    );
-  });
+	it('validates registered tool input before creating an action', () => {
+		assert.deepEqual(
+			activityRegistry.validateAction('feelings', 'select_mood', {
+				moodId: 'worried',
+				rationale: 'I have a lot on my mind.',
+			}),
+			{
+				activityId: 'feelings',
+				tool: 'select_mood',
+				input: {
+					type: 'select_mood',
+					moodId: 'worried',
+					rationale: 'I have a lot on my mind.',
+				},
+			},
+		);
+		assert.throws(
+			() =>
+				activityRegistry.validateAction('feelings', 'select_mood', {
+					moodId: 'invented',
+					rationale: 'A feeling outside the chart.',
+				}),
+			ActivityRegistryError,
+		);
+	});
 
-  it("validates whiteboard doodle tool input before creating an action", () => {
-    const input = {
-      strokes: [{ points: [{ x: 15, y: 25 }, { x: 70, y: 80 }] }],
-      caption: "A rough day",
-    };
-    assert.deepEqual(
-      activityRegistry.validateAction(
-        "whiteboard",
-        "replace_whiteboard_with_doodle",
-        input,
-      ),
-      {
-        activityId: "whiteboard",
-        tool: "replace_whiteboard_with_doodle",
-        input,
-      },
-    );
-    assert.throws(
-      () =>
-        activityRegistry.validateAction(
-          "whiteboard",
-          "replace_whiteboard_with_doodle",
-          { strokes: [{ points: [{ x: -1, y: 0 }, { x: 10, y: 10 }] }] },
-        ),
-      ActivityRegistryError,
-    );
-    assert.throws(
-      () =>
-        activityRegistry.validateAction(
-          "feelings",
-          "replace_whiteboard_with_doodle",
-          {
-            strokes: [{ points: [{ x: 0, y: 0 }, { x: 100, y: 100 }] }],
-          },
-        ),
-      ActivityRegistryError,
-    );
-  });
+	it('rejects whiteboard SVG actions until the sanitizer placeholder is replaced', () => {
+		const input = {
+			svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 350"><circle cx="20" cy="20" r="10" /></svg>',
+			spokenText: 'I drew how that felt.',
+		};
+		assert.throws(
+			() =>
+				activityRegistry.validateAction(
+					'whiteboard',
+					'replace_whiteboard_with_svg',
+					input,
+				),
+			/sanitization is not implemented/,
+		);
+		assert.throws(
+			() =>
+				activityRegistry.validateAction(
+					'whiteboard',
+					'replace_whiteboard_with_svg',
+					{ ...input, extra: true },
+				),
+			/unsupported field/,
+		);
+	});
 });
 
-describe("activity action dispatch", () => {
-  it("dispatches only to the captured active activity instance", () => {
-    const received: ActivityAction[] = [];
-    const captured = {
-      activityId: "feelings",
-      onAction: (action: ActivityAction) => received.push(action),
-    };
-    const other = {
-      activityId: "chess",
-      onAction: (action: ActivityAction) => received.push(action),
-    };
-    const moodAction: ActivityAction = {
-      activityId: "feelings",
-      tool: "select_mood",
-      input: { moodId: "worried" },
-    };
+describe('activity action dispatch', () => {
+	it('dispatches only to the captured active activity instance', () => {
+		const received: ActivityAction[] = [];
+		const captured = {
+			activityId: 'feelings',
+			onAction: (action: ActivityAction) => received.push(action),
+		};
+		const other = {
+			activityId: 'chess',
+			onAction: (action: ActivityAction) => received.push(action),
+		};
+		const moodAction: ActivityAction = {
+			activityId: 'feelings',
+			tool: 'select_mood',
+			input: { moodId: 'worried' },
+		};
 
-    dispatchActivityActions(captured, captured, [moodAction]);
-    dispatchActivityActions(other, captured, [moodAction]);
+		dispatchActivityActions(captured, captured, [moodAction]);
+		dispatchActivityActions(other, captured, [moodAction]);
 
-    assert.deepEqual(received, [moodAction]);
-  });
+		assert.deepEqual(received, [moodAction]);
+	});
 
-  it("does not apply a doodle after leaving the whiteboard", () => {
-    const received: ActivityAction[] = [];
-    const whiteboard = {
-      activityId: "whiteboard",
-      onAction: (action: ActivityAction) => received.push(action),
-    };
-    const feelings = {
-      activityId: "feelings",
-      onAction: (action: ActivityAction) => received.push(action),
-    };
-    const doodleAction: ActivityAction = {
-      activityId: "whiteboard",
-      tool: "replace_whiteboard_with_doodle",
-      input: { strokes: [{ points: [{ x: 1, y: 1 }, { x: 99, y: 99 }] }] },
-    };
+	it('does not apply a doodle after leaving the whiteboard', () => {
+		const received: ActivityAction[] = [];
+		const whiteboard = {
+			activityId: 'whiteboard',
+			onAction: (action: ActivityAction) => received.push(action),
+		};
+		const feelings = {
+			activityId: 'feelings',
+			onAction: (action: ActivityAction) => received.push(action),
+		};
+		const svgAction: ActivityAction = {
+			activityId: 'whiteboard',
+			tool: 'replace_whiteboard_with_svg',
+			input: { svg: '<svg />', spokenText: 'A small drawing.' },
+		};
 
-    dispatchActivityActions(whiteboard, whiteboard, [doodleAction]);
-    dispatchActivityActions(feelings, whiteboard, [doodleAction]);
+		dispatchActivityActions(whiteboard, whiteboard, [svgAction]);
+		dispatchActivityActions(feelings, whiteboard, [svgAction]);
 
-    assert.deepEqual(received, [doodleAction]);
-  });
+		assert.deepEqual(received, [svgAction]);
+	});
 });
