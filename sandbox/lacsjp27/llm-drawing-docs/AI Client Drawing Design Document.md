@@ -414,7 +414,6 @@ return typeof value === "object" && value !== null && !Array.isArray(value);}
 Keeps the SVG validation separate from the activity definition. Accepts a limited set of static shapes, removes the model's root SVG attributes, and rejects text, unsupported elements, and unsafe attribute
 
 
-
 ### 6.4 WhiteboardCanvas.tsx (rendering the svg)
 
 This section describes how `WhiteboardCanvas.tsx` applies the server-validated SVG action as an Excalidraw image. Line references below are to the current file before implementation.

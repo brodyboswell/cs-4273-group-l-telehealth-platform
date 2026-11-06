@@ -1,17 +1,27 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import '@excalidraw/excalidraw/index.css';
 import type {
+	DataURL,
 	ExcalidrawImperativeAPI,
 	ExcalidrawProps,
 } from '@excalidraw/excalidraw/types';
+import type { FileId } from '@excalidraw/excalidraw/element/types';
 import { useActivityTools } from '@/components/session/ActivityBridge';
 import { Icon } from '@/components/ui/Icon';
 import type { ActivityAction } from '@/lib/activities/types';
 import { WHITEBOARD_DOODLE_COLORS } from '@/lib/whiteboard/palette';
+import { sanitizeWhiteboardSvg } from '@/lib/whiteboard/sanitizeSvg';
 
 type ExcalidrawComponent = typeof import('@excalidraw/excalidraw').Excalidraw;
+
+interface SvgImageLayout {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
 
 export function preloadWhiteboardEditor() {
 	return import('@excalidraw/excalidraw');
@@ -34,6 +44,8 @@ export function WhiteboardCanvas() {
 	const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
 	const [hasContent, setHasContent] = useState(false);
 	const [actionError, setActionError] = useState<string | null>(null);
+	const [clientStatus, setClientStatus] = useState<string | null>(null);
+	const isMounted = useRef(false);
 	const [{ activeTool, color, strokeWidth }, setControls] = useState({
 		activeTool: 'freedraw',
 		color: WHITEBOARD_DOODLE_COLORS[0].value as string,
@@ -42,6 +54,7 @@ export function WhiteboardCanvas() {
 
 	useEffect(() => {
 		let isActive = true;
+		isMounted.current = true;
 
 		preloadWhiteboardEditor()
 			.then((module) => {
@@ -53,6 +66,7 @@ export function WhiteboardCanvas() {
 
 		return () => {
 			isActive = false;
+			isMounted.current = false;
 		};
 	}, []);
 
@@ -80,16 +94,70 @@ export function WhiteboardCanvas() {
 	);
 
 	const state = useMemo(() => ({ hasContent }), [hasContent]);
-	const handleAction = useCallback((action: ActivityAction) => {
-		if (
-			action.activityId !== 'whiteboard' ||
-			action.tool !== 'replace_whiteboard_with_svg'
-		)
-			return;
+	const handleAction = useCallback(
+		(action: ActivityAction) => {
+			if (
+				action.activityId !== 'whiteboard' ||
+				action.tool !== 'replace_whiteboard_with_svg'
+			) {
+				return;
+			}
 
-		// SVG insertion is deferred to implementation-plan section 6.4.
-		setActionError('Client-generated drawings are not available yet.');
-	}, []);
+			setActionError(null);
+			setClientStatus(null);
+			if (!api) {
+				setActionError(
+					'The whiteboard is still loading. Please try again shortly.',
+				);
+				return;
+			}
+
+			let svg: string;
+			try {
+				if (!isRecord(action.input) || typeof action.input.svg !== 'string') {
+					throw new Error('The client returned an invalid SVG drawing.');
+				}
+
+				// Recheck the server-sanitized action at the browser rendering boundary.
+				svg = sanitizeWhiteboardSvg(action.input.svg);
+			} catch (error) {
+				setActionError(
+					error instanceof Error
+						? error.message
+						: 'The client returned an invalid SVG drawing.',
+				);
+				return;
+			}
+
+			let layout: SvgImageLayout;
+			try {
+				layout = getSvgImageLayout(api);
+			} catch (error) {
+				setActionError(
+					error instanceof Error
+						? error.message
+						: 'Could not place the client drawing on the whiteboard.',
+				);
+				return;
+			}
+
+			void addSvgImage(api, svg, layout, () => isMounted.current)
+				.then(() => {
+					if (!isMounted.current) return;
+					setClientStatus('The client added a drawing to the whiteboard.');
+				})
+				.catch((error: unknown) => {
+					if (!isMounted.current) return;
+
+					setActionError(
+						error instanceof Error
+							? error.message
+							: 'Could not add the client drawing.',
+					);
+				});
+		},
+		[api],
+	);
 
 	// Register even while the editor's client-only bundle is loading.
 	useActivityTools('whiteboard', state, handleAction);
@@ -178,6 +246,14 @@ export function WhiteboardCanvas() {
 					{actionError}
 				</p>
 			)}
+			{clientStatus && (
+				<p
+					className="rounded-xl bg-sage/25 px-3 py-2 text-sm text-charcoal"
+					role="status"
+				>
+					{clientStatus}
+				</p>
+			)}
 			<div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl bg-white">
 				{Excalidraw ? (
 					<Excalidraw
@@ -220,4 +296,90 @@ export function WhiteboardCanvas() {
 			</div>
 		</div>
 	);
+}
+
+function getSvgImageLayout(api: ExcalidrawImperativeAPI): SvgImageLayout {
+	const appState = api.getAppState();
+	const zoom = appState.zoom.value || 1;
+	const aspectRatio = 500 / 350;
+	const visibleWidth = appState.width / zoom;
+	const visibleHeight = appState.height / zoom;
+
+	if (
+		!Number.isFinite(visibleWidth) ||
+		!Number.isFinite(visibleHeight) ||
+		visibleWidth <= 0 ||
+		visibleHeight <= 0
+	) {
+		throw new Error('The whiteboard viewport is not ready for a client drawing.');
+	}
+
+	const width = Math.min(
+		1_000,
+		visibleWidth * 0.82,
+		visibleHeight * 0.82 * aspectRatio,
+	);
+	const height = width / aspectRatio;
+
+	return {
+		x: -appState.scrollX + visibleWidth / 2 - width / 2,
+		y: -appState.scrollY + visibleHeight / 2 - height / 2,
+		width,
+		height,
+	};
+}
+
+async function addSvgImage(
+	api: ExcalidrawImperativeAPI,
+	svg: string,
+	layout: SvgImageLayout,
+	isMounted: () => boolean,
+): Promise<void> {
+	const { CaptureUpdateAction, convertToExcalidrawElements } =
+		await preloadWhiteboardEditor();
+
+	if (!isMounted()) return;
+
+	const fileId = `llm-svg-${crypto.randomUUID()}` as FileId;
+	const svgBytes = new TextEncoder().encode(svg);
+	const binarySvg = Array.from(svgBytes, (byte) =>
+		String.fromCharCode(byte),
+	).join('');
+	const dataURL =
+		`data:image/svg+xml;base64,${btoa(binarySvg)}` as DataURL;
+
+	api.addFiles([
+		{
+			id: fileId,
+			mimeType: 'image/svg+xml',
+			dataURL,
+			created: Date.now(),
+		},
+	]);
+
+	const image = convertToExcalidrawElements(
+		[
+			{
+				type: 'image',
+				fileId,
+				x: layout.x,
+				y: layout.y,
+				width: layout.width,
+				height: layout.height,
+				status: 'saved',
+			},
+		],
+		{ regenerateIds: true },
+	);
+
+	api.updateScene({
+		elements: image,
+		captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+	});
+
+	api.scrollToContent(image, { fitToContent: true, animate: true });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

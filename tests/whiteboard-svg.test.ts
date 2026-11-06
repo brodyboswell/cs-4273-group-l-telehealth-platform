@@ -7,6 +7,7 @@ import {
 import {
 	MAX_WHITEBOARD_SPOKEN_TEXT_LENGTH,
 	MAX_WHITEBOARD_SVG_LENGTH,
+	sanitizeWhiteboardSvg,
 } from '../lib/whiteboard/sanitizeSvg';
 
 const parseInput = whiteboardActivity.tools[0]!.parseInput;
@@ -64,10 +65,16 @@ describe('whiteboard SVG action parser', () => {
 		);
 	});
 
-	it('fails closed for valid input while SVG sanitization is a placeholder', () => {
-		assert.throws(
-			() => parseInput(validAction),
-			/sanitization is not implemented/,
+	it('accepts a valid action after SVG sanitization', () => {
+		const parseWithRealSanitizer = createWhiteboardSvgActionParser(
+			sanitizeWhiteboardSvg,
+		);
+		const parsed = parseWithRealSanitizer(validAction);
+
+		assert.equal(parsed.spokenText, validAction.spokenText);
+		assert.equal(
+			parsed.svg,
+			'<svg xmlns="http://www.w3.org/2000/svg" width="500" height="350" viewBox="0 0 500 350"><circle cx="20" cy="20" r="10"/></svg>',
 		);
 	});
 });
