@@ -85,6 +85,7 @@ const whiteboardSvgTool: ActivityTool<WhiteboardSvgAction> = {
 	description: [
 		'Use only after the learner directly asks you or clearly agrees to a drawing.',
 		'Draw one relevant feeling, event, or idea already discussed, or what the learner prompted you to draw.',
+		'Always include a complete, non-empty SVG document in the svg field. Never omit it or send an empty string.',
 		drawingGuidance,
 		'Put the complete SVG document in the svg field, with no Markdown fences or explanation in that field.',
 		'This action replaces the entire whiteboard.',

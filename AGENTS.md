@@ -1,5 +1,5 @@
 # AGENTS.md
-> Last updated: 2026-11-05
+> Last updated: 2026-11-06
 
 ## Project Overview
 
@@ -117,6 +117,13 @@ public/                      # Static images and avatars
 ## Decisions & Gotchas Log
 
 *Append-only. Add new entries at the top.*
+
+**2026-11-06 — Animate client SVG strokes before image insertion**
+Context: The client drawing appeared all at once when its Excalidraw image was inserted.
+Decision: Show a temporary SVG overlay with sequential stroke and fill animations, then insert the unchanged sanitized SVG as the undoable Excalidraw image. Skip the animation when reduced motion is preferred.
+Rationale: Gives the learner a draw-on effect while keeping active animation markup out of the saved whiteboard image.
+
+---
 
 **2026-11-05 — Sanitize and render virtual-client whiteboard SVG**
 Context: The bounded SVG action was registered while sanitization and Excalidraw image insertion remained deferred.
