@@ -11,6 +11,7 @@ import type { FileId } from '@excalidraw/excalidraw/element/types';
 import { useActivityTools } from '@/components/session/ActivityBridge';
 import { Icon } from '@/components/ui/Icon';
 import type { ActivityAction } from '@/lib/activities/types';
+import { createDrawAnimation } from '@/lib/whiteboard/createDrawAnimation';
 import { WHITEBOARD_DOODLE_COLORS } from '@/lib/whiteboard/palette';
 import { sanitizeWhiteboardSvg } from '@/lib/whiteboard/sanitizeSvg';
 
@@ -19,6 +20,15 @@ type ExcalidrawComponent = typeof import('@excalidraw/excalidraw').Excalidraw;
 interface SvgImageLayout {
 	x: number;
 	y: number;
+	width: number;
+	height: number;
+	displayWidth: number;
+	displayHeight: number;
+}
+
+interface BoardAnimation {
+	markup: string;
+	durationMs: number;
 	width: number;
 	height: number;
 }
@@ -45,7 +55,9 @@ export function WhiteboardCanvas() {
 	const [hasContent, setHasContent] = useState(false);
 	const [actionError, setActionError] = useState<string | null>(null);
 	const [clientStatus, setClientStatus] = useState<string | null>(null);
+	const [animation, setAnimation] = useState<BoardAnimation | null>(null);
 	const isMounted = useRef(false);
+	const drawSequence = useRef(0);
 	const [{ activeTool, color, strokeWidth }, setControls] = useState({
 		activeTool: 'freedraw',
 		color: WHITEBOARD_DOODLE_COLORS[0].value as string,
@@ -141,20 +153,21 @@ export function WhiteboardCanvas() {
 				return;
 			}
 
-			void addSvgImage(api, svg, layout, () => isMounted.current)
-				.then(() => {
-					if (!isMounted.current) return;
-					setClientStatus('The client added a drawing to the whiteboard.');
-				})
-				.catch((error: unknown) => {
-					if (!isMounted.current) return;
-
+			const sequence = ++drawSequence.current;
+			void animateAndAddSvgImage(
+				api,
+				svg,
+				layout,
+				() => isMounted.current && drawSequence.current === sequence,
+				setAnimation,
+				() => setClientStatus('The client added a drawing to the whiteboard.'),
+				(error) =>
 					setActionError(
 						error instanceof Error
 							? error.message
 							: 'Could not add the client drawing.',
-					);
-				});
+					),
+			);
 		},
 		[api],
 	);
@@ -238,22 +251,6 @@ export function WhiteboardCanvas() {
 					</select>
 				</label>
 			</div>
-			{actionError && (
-				<p
-					className="rounded-xl bg-terracotta/15 px-3 py-2 text-sm text-white"
-					role="alert"
-				>
-					{actionError}
-				</p>
-			)}
-			{clientStatus && (
-				<p
-					className="rounded-xl bg-sage/25 px-3 py-2 text-sm text-charcoal"
-					role="status"
-				>
-					{clientStatus}
-				</p>
-			)}
 			<div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl bg-white">
 				{Excalidraw ? (
 					<Excalidraw
@@ -293,6 +290,34 @@ export function WhiteboardCanvas() {
 							: 'Getting your board ready…'}
 					</div>
 				)}
+				{actionError && (
+					<p
+						className="absolute left-3 right-3 top-3 z-20 rounded-xl bg-terracotta/15 px-3 py-2 text-sm text-charcoal"
+						role="alert"
+					>
+						{actionError}
+					</p>
+				)}
+				{clientStatus && (
+					<p
+						className="absolute bottom-3 left-3 right-3 z-20 rounded-xl bg-sage/90 px-3 py-2 text-sm text-charcoal"
+						role="status"
+					>
+						{clientStatus}
+					</p>
+				)}
+				{animation && (
+					<div
+						className="pointer-events-none absolute inset-0 z-10 grid cursor-wait place-items-center"
+						aria-hidden="true"
+					>
+						<div
+							className="svg-animation-art pointer-events-none max-h-full max-w-full"
+							style={{ width: animation.width, height: animation.height }}
+							dangerouslySetInnerHTML={{ __html: animation.markup }}
+						/>
+					</div>
+				)}
 			</div>
 		</div>
 	);
@@ -326,6 +351,8 @@ function getSvgImageLayout(api: ExcalidrawImperativeAPI): SvgImageLayout {
 		y: -appState.scrollY + visibleHeight / 2 - height / 2,
 		width,
 		height,
+		displayWidth: width * zoom,
+		displayHeight: height * zoom,
 	};
 }
 
@@ -333,12 +360,12 @@ async function addSvgImage(
 	api: ExcalidrawImperativeAPI,
 	svg: string,
 	layout: SvgImageLayout,
-	isMounted: () => boolean,
+	isActive: () => boolean,
 ): Promise<void> {
 	const { CaptureUpdateAction, convertToExcalidrawElements } =
 		await preloadWhiteboardEditor();
 
-	if (!isMounted()) return;
+	if (!isActive()) return;
 
 	const fileId = `llm-svg-${crypto.randomUUID()}` as FileId;
 	const svgBytes = new TextEncoder().encode(svg);
@@ -378,6 +405,51 @@ async function addSvgImage(
 	});
 
 	api.scrollToContent(image, { fitToContent: true, animate: true });
+}
+
+async function animateAndAddSvgImage(
+	api: ExcalidrawImperativeAPI,
+	svg: string,
+	layout: SvgImageLayout,
+	isActive: () => boolean,
+	setAnimation: (animation: BoardAnimation | null) => void,
+	onApplied: () => void,
+	onError: (error: unknown) => void,
+): Promise<void> {
+	try {
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			setAnimation(null);
+		} else {
+			const drawAnimation = createDrawAnimation(svg);
+			setAnimation({
+				...drawAnimation,
+				width: layout.displayWidth,
+				height: layout.displayHeight,
+			});
+			await waitForPaint();
+			await wait(drawAnimation.durationMs);
+			if (!isActive()) return;
+		}
+
+		setAnimation(null);
+		await addSvgImage(api, svg, layout, isActive);
+		if (!isActive()) return;
+		onApplied();
+	} catch (error) {
+		if (!isActive()) return;
+		setAnimation(null);
+		onError(error);
+	}
+}
+
+function waitForPaint(): Promise<void> {
+	return new Promise((resolve) => {
+		requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+	});
+}
+
+function wait(durationMs: number): Promise<void> {
+	return new Promise((resolve) => window.setTimeout(resolve, durationMs));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

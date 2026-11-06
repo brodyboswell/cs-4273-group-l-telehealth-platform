@@ -50,6 +50,7 @@ export class LlmError extends Error {
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_OUTPUT_TOKENS = 300;
+const MAX_TOOL_OUTPUT_TOKENS = 1_000;
 
 export function resolveProvider(
   env: ProviderEnvironment = process.env,
@@ -147,12 +148,14 @@ async function callAnthropic(
 ): Promise<LlmReply> {
   const apiKey = requireKey(env.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY");
   const model = env.ANTHROPIC_MODEL || "claude-haiku-4-5";
+  const maxOutputTokens =
+    tools.length > 0 ? MAX_TOOL_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS;
   const data = await postJson(
     "https://api.anthropic.com/v1/messages",
     { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     {
       model,
-      max_tokens: MAX_OUTPUT_TOKENS,
+      max_tokens: maxOutputTokens,
       system: systemPrompt,
       messages: history,
       ...(tools.length > 0
@@ -207,12 +210,14 @@ async function callOpenAI(
 ): Promise<LlmReply> {
   const apiKey = requireKey(env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const model = env.OPENAI_MODEL || "gpt-4o-mini";
+  const maxOutputTokens =
+    tools.length > 0 ? MAX_TOOL_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS;
   const data = await postJson(
     "https://api.openai.com/v1/chat/completions",
     { authorization: `Bearer ${apiKey}` },
     {
       model,
-      max_completion_tokens: MAX_OUTPUT_TOKENS,
+      max_completion_tokens: maxOutputTokens,
       messages: [{ role: "system", content: systemPrompt }, ...history],
       ...(tools.length > 0
         ? {

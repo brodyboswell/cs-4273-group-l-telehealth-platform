@@ -614,4 +614,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 ```
 
-The sandbox's animated draw-on overlay is separate from Excalidraw image insertion. It can be added before `addSvgImage()` if the production whiteboard should animate the SVG as it appears.
+The production whiteboard displays the sandbox's animated draw-on overlay before inserting the sanitized static SVG as an Excalidraw image. It animates strokes and fills in shape order; reduced-motion preferences skip the overlay.
