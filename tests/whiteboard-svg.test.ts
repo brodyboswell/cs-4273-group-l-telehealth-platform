@@ -7,6 +7,7 @@ import {
 import {
 	MAX_WHITEBOARD_SPOKEN_TEXT_LENGTH,
 	MAX_WHITEBOARD_SVG_LENGTH,
+	sanitizeWhiteboardSvg,
 } from '../lib/whiteboard/sanitizeSvg';
 
 const parseInput = whiteboardActivity.tools[0]!.parseInput;
@@ -65,7 +66,10 @@ describe('whiteboard SVG action parser', () => {
 	});
 
 	it('accepts a valid action after SVG sanitization', () => {
-		const parsed = parseInput(validAction);
+		const parseWithRealSanitizer = createWhiteboardSvgActionParser(
+			sanitizeWhiteboardSvg,
+		);
+		const parsed = parseWithRealSanitizer(validAction);
 
 		assert.equal(parsed.spokenText, validAction.spokenText);
 		assert.equal(

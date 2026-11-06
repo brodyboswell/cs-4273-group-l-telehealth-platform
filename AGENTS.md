@@ -31,7 +31,7 @@ The repository also contains the original cross-stack unit-test exercises under 
 ## Architecture
 
 **High-level design:**
-The current app is a Next.js 15 App Router prototype using React 19 and Tailwind CSS. The shared practice shell owns one persistent chat panel and an activity bridge. The active activity registers a validated state snapshot and provider-neutral tool definitions; the server registry adds activity context to the LLM request, validates returned actions, and stores them in the transcript. The welcome room and activity routes render beside chat on larger screens; chat expands from a right-edge tab on narrow screens. The whiteboard keeps Excalidraw for learner marks and exposes a bounded SVG action for the virtual client. The allow-list sanitizer and client SVG insertion remain deferred; the server fails closed until sanitization is implemented. Future collaboration and audit persistence should remain separate from the canvas renderer so whiteboard actions can be associated with a telehealth session log.
+The current app is a Next.js 15 App Router prototype using React 19 and Tailwind CSS. The shared practice shell owns one persistent chat panel and an activity bridge. The active activity registers a validated state snapshot and provider-neutral tool definitions; the server registry adds activity context to the LLM request, validates returned actions, and stores them in the transcript. The welcome room and activity routes render beside chat on larger screens; chat expands from a right-edge tab on narrow screens. The whiteboard keeps Excalidraw for learner marks and exposes a bounded SVG action for the virtual client. The server and browser apply the allow-list sanitizer; accepted client SVG is added as one undoable Excalidraw image that replaces the current scene. Future collaboration and audit persistence should remain separate from the canvas renderer so whiteboard actions can be associated with a telehealth session log.
 
 ```
 [Practice room shell] -> [Activity route] -> [Whiteboard client editor]
@@ -117,6 +117,13 @@ public/                      # Static images and avatars
 ## Decisions & Gotchas Log
 
 *Append-only. Add new entries at the top.*
+
+**2026-11-05 — Sanitize and render virtual-client whiteboard SVG**
+Context: The bounded SVG action was registered while sanitization and Excalidraw image insertion remained deferred.
+Decision: Sanitize SVG at the server activity boundary and again before browser rendering. Insert it as a centered Excalidraw image that replaces the current scene and is captured as one undoable update.
+Rationale: Only bounded static markup from the whiteboard allow-list reaches the renderer, and the client drawing follows the action's replace-board contract.
+
+---
 
 **2026-11-05 — Define virtual-client whiteboard actions as bounded SVG**
 Context: The freehand stroke tool belonged to an earlier whiteboard design and did not match the SVG-based implementation plan.
@@ -286,5 +293,5 @@ Rationale: The whiteboard should feel like an activity inside the telehealth pra
 - [x] Validate whiteboard activity snapshots and reject unsupported fields.
 - [x] Replace the stroke-based doodle tool with the bounded SVG action and spoken-text field.
 - [x] Add SVG drawing guidance and register the whiteboard through the activity bridge while the editor loads.
-- [ ] Implement the allow-list SVG sanitizer from section 6.3.
-- [ ] Render sanitized client SVG as an Excalidraw image from section 6.4.
+- [x] Implement the allow-list SVG sanitizer from section 6.3.
+- [x] Render sanitized client SVG as an Excalidraw image from section 6.4.
