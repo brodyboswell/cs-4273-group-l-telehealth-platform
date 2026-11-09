@@ -27,22 +27,22 @@ function newSessionId(): string {
 }
 
 /** Keeps the same session while the learner moves between activities in one tab. */
-function loadSessionId(): string {
+function loadSessionId(storageKey: string): string {
   try {
-    const saved = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
+    const saved = window.sessionStorage.getItem(storageKey);
     if (isValidSessionId(saved)) return saved;
 
     const created = newSessionId();
-    window.sessionStorage.setItem(SESSION_STORAGE_KEY, created);
+    window.sessionStorage.setItem(storageKey, created);
     return created;
   } catch {
     return newSessionId();
   }
 }
 
-function saveSessionId(id: string) {
+function saveSessionId(id: string, storageKey: string) {
   try {
-    window.sessionStorage.setItem(SESSION_STORAGE_KEY, id);
+    window.sessionStorage.setItem(storageKey, id);
   } catch {
     // Storage can be blocked (private mode); the session still works for this page view.
   }
@@ -55,7 +55,8 @@ function formatTime(iso: string) {
   });
 }
 
-export function ChatPanel({ compact = false }: { compact?: boolean }) {
+export function ChatPanel({ compact = false, userId }: { compact?: boolean; userId: string }) {
+  const storageKey = `${SESSION_STORAGE_KEY}.${userId}`;
   const activityBridge = useActivityBridge();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
@@ -121,7 +122,7 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
   );
 
   useEffect(() => {
-    const id = loadSessionId();
+    const id = loadSessionId(storageKey);
     setSessionId(id);
     void loadTranscript(id);
 
@@ -129,7 +130,7 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
       activeSession.current = null;
       transcriptRequest.current?.abort();
     };
-  }, [loadTranscript]);
+  }, [loadTranscript, storageKey]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -355,7 +356,7 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
 
   function startNewSession() {
     const id = newSessionId();
-    saveSessionId(id);
+    saveSessionId(id, storageKey);
     setSessionId(id);
     setEntries([]);
     void loadTranscript(id);

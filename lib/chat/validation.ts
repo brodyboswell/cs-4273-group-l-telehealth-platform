@@ -47,6 +47,7 @@ export function isTranscript(value: unknown): value is Transcript {
     !isValidSessionId(value.sessionId) ||
     typeof value.personaId !== "string" ||
     typeof value.personaName !== "string" ||
+    (value.ownerId !== undefined && (typeof value.ownerId !== "string" || !value.ownerId)) ||
     !isTimestamp(value.createdAt) ||
     !isTimestamp(value.updatedAt) ||
     !Array.isArray(value.entries)

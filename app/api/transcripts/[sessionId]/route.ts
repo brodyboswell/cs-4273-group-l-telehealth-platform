@@ -1,3 +1,4 @@
+import { auth } from "@/lib/auth/server";
 /**
  * GET /api/transcripts/:sessionId            -> transcript as JSON
  * GET /api/transcripts/:sessionId?format=txt -> readable plain-text transcript
@@ -13,6 +14,7 @@ import { DEFAULT_PERSONA } from "@/lib/chat/persona";
 import {
   formatTranscriptText,
   getOrCreateTranscript,
+  TranscriptAccessError,
   withSessionLock,
 } from "@/lib/chat/transcriptStore";
 
@@ -23,6 +25,8 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ sessionId: string }> },
 ) {
+  const user = await auth.getUser();
+  if (!user) return jsonError(401, "Please log in to continue.");
   const { sessionId } = await params;
   if (!isValidSessionId(sessionId)) {
     return jsonError(400, "Invalid session id.");
@@ -31,9 +35,10 @@ export async function GET(
   let transcript: Transcript;
   try {
     transcript = await withSessionLock(sessionId, () =>
-      getOrCreateTranscript(sessionId, DEFAULT_PERSONA),
+      getOrCreateTranscript(sessionId, DEFAULT_PERSONA, user.id),
     );
   } catch (error) {
+    if (error instanceof TranscriptAccessError) return jsonError(404, "Transcript not found.");
     console.error("[transcripts] could not load session:", error);
     return jsonError(500, "Could not load the transcript.");
   }

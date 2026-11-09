@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,6 +7,7 @@ import { Chess } from "chess.js";
 import { POST } from "../app/api/chat/route";
 import { GET as getTranscript } from "../app/api/transcripts/[sessionId]/route";
 import { GET as getTranscripts } from "../app/api/transcripts/route";
+import { auth } from "../lib/auth/server";
 import { DEFAULT_PERSONA } from "../lib/chat/persona";
 import {
   generateClientReply,
@@ -157,6 +158,41 @@ describe("transcript storage", () => {
 });
 
 describe("chat HTTP endpoints", () => {
+  before(() => {
+    mock.method(auth, "getUser", async () => ({ id: "learner-one" }));
+  });
+  it("rejects logged-out requests before reading or writing transcripts", async (context) => {
+    context.mock.method(auth, "getUser", async () => null);
+    for (const response of [
+      await post({ sessionId: "logged-out-session", message: "Hi" }),
+      await get("logged-out-session"),
+      await getTranscripts(),
+    ]) {
+      assert.equal(response.status, 401);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+    }
+    assert.equal(await readTranscript("logged-out-session"), null);
+  });
+
+  it("blocks other users and legacy ownerless sessions without changing them", async (context) => {
+    const id = "private-auth-session";
+    assert.equal((await post({ sessionId: id, message: "Private message" })).status, 200);
+    const original = await readTranscript(id);
+    assert.equal(original?.ownerId, "learner-one");
+    await getOrCreateTranscript("legacy-auth-session", DEFAULT_PERSONA);
+    context.mock.method(auth, "getUser", async () => ({ id: "learner-two" }));
+    for (const sessionId of [id, "legacy-auth-session"]) {
+      assert.equal((await get(sessionId)).status, 404);
+      assert.equal((await post({ sessionId, message: "Unauthorized edit" })).status, 404);
+    }
+    const listing = await getTranscripts();
+    assert.deepEqual((await listing.json()).sessions, []);
+    assert.deepEqual(await readTranscript(id), original);
+    assert.equal((await get("second-owner-session")).status, 200);
+    const ownListing = await getTranscripts();
+    assert.deepEqual((await ownListing.json()).sessions.map((row: { sessionId: string }) => row.sessionId), ["second-owner-session"]);
+  });
+
   it("rejects malformed bodies and enforces the shared message limit", async () => {
     assert.equal((await post(null)).status, 400);
     assert.equal((await post([])).status, 400);

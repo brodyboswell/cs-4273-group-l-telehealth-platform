@@ -15,7 +15,7 @@ const ACTIVITY_ROUTES = new Set([
   "/practice/chess",
 ]);
 
-export function SessionShell({ children }: { children: React.ReactNode }) {
+export function SessionShell({ children, userId }: { children: React.ReactNode; userId: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const activityPage = ACTIVITY_ROUTES.has(pathname);
@@ -116,7 +116,7 @@ export function SessionShell({ children }: { children: React.ReactNode }) {
                     Close
                   </button>
                 </div>
-                <ChatPanel compact={sideChatPage} />
+                <ChatPanel userId={userId} compact={sideChatPage} />
               </div>
             </aside>
           </div>

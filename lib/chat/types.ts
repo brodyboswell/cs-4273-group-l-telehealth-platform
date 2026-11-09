@@ -39,6 +39,8 @@ export interface TranscriptEntry {
 }
 
 export interface Transcript {
+  /** Supabase user ID. Absent only on legacy prototype transcripts. */
+  ownerId?: string;
   sessionId: string;
   personaId: string;
   personaName: string;
