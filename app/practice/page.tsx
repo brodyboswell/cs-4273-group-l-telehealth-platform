@@ -1,5 +1,5 @@
-import { WelcomeRoom } from "@/components/activities/WelcomeRoom";
+import { redirect } from "next/navigation";
 
 export default function PracticePage() {
-  return <WelcomeRoom />;
+  redirect("/sessions/new");
 }

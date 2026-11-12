@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     }
   }
   const response = NextResponse.redirect(new URL(
-    confirmed ? "/practice" : "/login?confirmation=failed",
+    confirmed ? "/sessions/new" : "/login?confirmation=failed",
     request.nextUrl.origin,
   ));
   response.headers.set("Cache-Control", "private, no-store");

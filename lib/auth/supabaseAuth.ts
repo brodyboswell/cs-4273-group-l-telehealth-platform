@@ -21,7 +21,7 @@ export async function signUp(
   }
   // With confirmation enabled, signup creates a user but grants no session.
   return data.session
-    ? { ok: true, redirectTo: "/practice" }
+    ? { ok: true, redirectTo: "/sessions/new" }
     : { ok: true, confirmationRequired: true };
 }
 
@@ -31,7 +31,7 @@ export async function signIn(credentials: LoginCredentials): Promise<LoginResult
   if (error) {
     return { ok: false, message: "Sign-in failed. Check your email and password and make sure your email is confirmed." };
   }
-  return { ok: true, redirectTo: "/practice" };
+  return { ok: true, redirectTo: "/sessions/new" };
 }
 
 export async function signOut(): Promise<{ redirectTo: string }> {

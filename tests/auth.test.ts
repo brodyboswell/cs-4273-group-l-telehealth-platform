@@ -96,14 +96,14 @@ describe("account creation", () => {
 });
 
 describe("signup confirmation callback", () => {
-  it("exchanges a valid code and redirects only to practice", async (context) => {
+  it("exchanges a valid code and redirects only to session setup", async (context) => {
     const exchange = context.mock.method(auth, "exchangeCodeForSession", async (code: string) => {
       assert.equal(code, "valid-test-code");
       return true;
     });
     const response = await confirmSignup(new NextRequest("http://localhost/auth/callback?code=valid-test-code&next=https://example.org"));
     assert.equal(exchange.mock.callCount(), 1);
-    assert.equal(response.headers.get("location"), "http://localhost/practice");
+    assert.equal(response.headers.get("location"), "http://localhost/sessions/new");
     assert.match(response.headers.get("cache-control") ?? "", /no-store/);
     assert.equal(response.headers.get("referrer-policy"), "no-referrer");
   });

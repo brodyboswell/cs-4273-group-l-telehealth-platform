@@ -1,20 +1,81 @@
 /**
  * Transcript storage: one JSON file per practice session.
  *
- * Files live in TRANSCRIPT_DIR (default: ./data/transcripts, git-ignored). This is
- * fine for a local prototype and for researchers to collect files after a study
- * session. On serverless hosts (e.g. Vercel) the filesystem is not persistent —
- * swap this module for a database while keeping the same exported functions.
+ * Local file mode uses TRANSCRIPT_DIR (default: ./data/transcripts, git-ignored).
+ * Hosted browser mode builds and appends temporary snapshots without filesystem
+ * access. Browser history is not an authoritative audit log. Database persistence
+ * and the session-log UI remain future work.
  */
 // Server-only module: never import this from a "use client" component.
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isValidSessionId, isTranscript } from "./validation";
-import type { Persona } from "./persona";
+import { DEFAULT_PERSONA, type Persona } from "./persona";
 import type { ChatTurn, Speaker, Transcript, TranscriptEntry } from "./types";
+import { usesBrowserSessions } from "./storageMode";
 
 export class TranscriptAccessError extends Error {}
+export class SessionEndedError extends Error {}
+
+/** A retry of the same start request must not create a second transcript. */
+export async function createPracticeSession(
+  ownerId: string,
+  name: string,
+  requestId: string,
+): Promise<Transcript> {
+  const sessionId = `s-${createHash("sha256")
+    .update(ownerId)
+    .update("\0")
+    .update(requestId)
+    .digest("hex")
+    .slice(0, 40)}`;
+  if (usesBrowserSessions())
+    return buildTranscript(
+      sessionId,
+      DEFAULT_PERSONA,
+      ownerId,
+      name || `Practice with ${DEFAULT_PERSONA.name}`,
+    );
+  return withSessionLock(sessionId, async () => {
+    const existing = await readTranscript(sessionId);
+    if (existing) {
+      if (existing.ownerId !== ownerId)
+        throw new TranscriptAccessError("Transcript not found.");
+      return existing;
+    }
+    return getOrCreateTranscript(
+      sessionId,
+      DEFAULT_PERSONA,
+      ownerId,
+      name || `Practice with ${DEFAULT_PERSONA.name}`,
+    );
+  });
+}
+
+export async function getOwnedTranscript(
+  sessionId: string,
+  ownerId: string,
+): Promise<Transcript> {
+  const transcript = await readTranscript(sessionId);
+  if (!transcript || transcript.ownerId !== ownerId)
+    throw new TranscriptAccessError("Transcript not found.");
+  return transcript;
+}
+
+export async function endPracticeSession(
+  sessionId: string,
+  ownerId: string,
+): Promise<Transcript> {
+  return withSessionLock(sessionId, async () => {
+    const transcript = await getOwnedTranscript(sessionId, ownerId);
+    if (!transcript.endedAt) {
+      transcript.endedAt = new Date().toISOString();
+      await appendEntry(transcript, "system", "Practice session ended.");
+    }
+    return transcript;
+  });
+}
 
 function transcriptDir(): string {
   return path.resolve(
@@ -32,6 +93,7 @@ function fileFor(sessionId: string): string {
 export async function readTranscript(
   sessionId: string,
 ): Promise<Transcript | null> {
+  if (usesBrowserSessions()) return null;
   try {
     const data: unknown = JSON.parse(
       await fs.readFile(fileFor(sessionId), "utf8"),
@@ -46,6 +108,7 @@ export async function readTranscript(
 }
 
 async function writeTranscript(t: Transcript): Promise<void> {
+  if (usesBrowserSessions()) return;
   const file = fileFor(t.sessionId);
   await fs.mkdir(path.dirname(file), { recursive: true });
   // Write-then-rename so a crash mid-write never leaves a half-written transcript.
@@ -85,6 +148,7 @@ export async function getOrCreateTranscript(
   sessionId: string,
   persona: Persona,
   ownerId?: string,
+  name?: string,
 ): Promise<Transcript> {
   const existing = await readTranscript(sessionId);
   if (existing) {
@@ -93,9 +157,21 @@ export async function getOrCreateTranscript(
       throw new TranscriptAccessError("Transcript not found.");
     return existing;
   }
+  const t = buildTranscript(sessionId, persona, ownerId, name);
+  await writeTranscript(t);
+  return t;
+}
+
+function buildTranscript(
+  sessionId: string,
+  persona: Persona,
+  ownerId?: string,
+  name?: string,
+): Transcript {
   const now = new Date().toISOString();
   const t: Transcript = {
     sessionId,
+    ...(name !== undefined ? { name } : {}),
     ...(ownerId !== undefined ? { ownerId } : {}),
     personaId: persona.id,
     personaName: persona.name,
@@ -111,7 +187,6 @@ export async function getOrCreateTranscript(
   pushEntry(t, "virtual_client", persona.openingLine, {
     model: "scripted:opening-line",
   });
-  await writeTranscript(t);
   return t;
 }
 
@@ -191,14 +266,22 @@ export function toChatHistory(t: Transcript): ChatTurn[] {
   return turns;
 }
 
-export async function listTranscripts(ownerId?: string): Promise<
+export async function listTranscripts(
+  ownerId?: string,
+): Promise<
   Array<
     Pick<
       Transcript,
-      "sessionId" | "personaName" | "createdAt" | "updatedAt"
+      | "sessionId"
+      | "name"
+      | "endedAt"
+      | "personaName"
+      | "createdAt"
+      | "updatedAt"
     > & { entryCount: number }
   >
 > {
+  if (usesBrowserSessions()) return [];
   let files: string[];
   try {
     files = await fs.readdir(transcriptDir());
@@ -212,7 +295,12 @@ export async function listTranscripts(ownerId?: string): Promise<
   const rows: Array<
     Pick<
       Transcript,
-      "sessionId" | "personaName" | "createdAt" | "updatedAt"
+      | "sessionId"
+      | "name"
+      | "endedAt"
+      | "personaName"
+      | "createdAt"
+      | "updatedAt"
     > & { entryCount: number }
   > = [];
   // Bound file reads so a large archive cannot exhaust the process's file handles.
@@ -223,9 +311,14 @@ export async function listTranscripts(ownerId?: string): Promise<
         .map((file) => readTranscript(file.slice(0, -5))),
     );
     for (const transcript of batch) {
-      if (transcript && (ownerId === undefined || transcript.ownerId === ownerId))
+      if (
+        transcript &&
+        (ownerId === undefined || transcript.ownerId === ownerId)
+      )
         rows.push({
           sessionId: transcript.sessionId,
+          name: transcript.name,
+          endedAt: transcript.endedAt,
           personaName: transcript.personaName,
           createdAt: transcript.createdAt,
           updatedAt: transcript.updatedAt,
@@ -248,16 +341,20 @@ export function formatTranscriptText(t: Transcript): string {
   const header = [
     `Telehealth practice session transcript`,
     `Session ID: ${t.sessionId}`,
+    ...(t.name ? [`Session name: ${t.name}`] : []),
     `Virtual client: ${t.personaName} (${t.personaId})`,
     `Started: ${t.createdAt}`,
     `Last updated: ${t.updatedAt}`,
+    ...(t.endedAt ? [`Ended: ${t.endedAt}`] : []),
     `Entries: ${t.entries.length}`,
     "".padEnd(60, "-"),
   ];
   const lines = t.entries.flatMap((e) => [
     `[${e.timestamp}] #${e.seq} ${SPEAKER_LABEL[e.speaker](t)}: ${e.text}`,
     ...(e.activity
-      ? [`  Activity context (${e.activity.activityId}): ${JSON.stringify(e.activity.state)}`]
+      ? [
+          `  Activity context (${e.activity.activityId}): ${JSON.stringify(e.activity.state)}`,
+        ]
       : []),
     ...(e.actions ?? []).map(
       (action) =>
@@ -267,7 +364,9 @@ export function formatTranscriptText(t: Transcript): string {
       ? [`  Available tools: ${e.activityNotice.toolNames.join(", ")}`]
       : []),
     ...(e.activityEvent
-      ? [`  Activity event (${e.activityEvent.activityId}.${e.activityEvent.type}): ${JSON.stringify(e.activityEvent.input)}`]
+      ? [
+          `  Activity event (${e.activityEvent.activityId}.${e.activityEvent.type}): ${JSON.stringify(e.activityEvent.input)}`,
+        ]
       : []),
   ]);
   return [...header, ...lines, ""].join("\n");

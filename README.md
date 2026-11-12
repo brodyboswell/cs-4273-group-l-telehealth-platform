@@ -15,7 +15,9 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open [localhost:3000](http://localhost:3000). The app opens `/login`; signed-in users can access `/practice`.
+Open [localhost:3000](http://localhost:3000). The app opens `/login`; signing in opens `/sessions/new` to start a practice session.
+
+Development output lives in `.next-dev`; production builds use `.next`. This keeps `npm run build` from overwriting chunks used by a running development server. If a browser was open during a server restart, reload the page to load the current chunks.
 
 ## Supabase setup
 
@@ -29,9 +31,20 @@ Open [localhost:3000](http://localhost:3000). The app opens `/login`; signed-in 
 
 3. In **Authentication → Providers**, enable email/password and allow new user signups. Keep **Confirm email** enabled for real users.
 4. In **Authentication → URL Configuration**, use `http://localhost:3000` as the local Site URL and add `http://localhost:3000/auth/callback` to the allowed Redirect URLs. Add the equivalent callback URL for each deployed environment. Keep the default confirmation email template using `{{ .ConfirmationURL }}`; it confirms the email with Supabase before returning a PKCE code to the app.
-5. Visit `/login` and click **Create account**, or open `/signup`. Use a real email address and a password with at least eight characters. Confirm the email in the same browser where you signed up; the callback creates the session and opens `/practice`. If confirmation is disabled in Supabase, signup signs in immediately. For a dummy test account, **Authentication → Users → Add user** with email auto-confirm remains available. Password recovery is not yet implemented.
+5. Visit `/login` and click **Create account**, or open `/signup`. Use a real email address and a password with at least eight characters. Confirm the email in the same browser where you signed up; the callback signs you in and opens `/sessions/new`. If confirmation is disabled in Supabase, signup signs in immediately. For a dummy test account, **Authentication → Users → Add user** with email auto-confirm remains available. Password recovery is not yet implemented.
 6. Restart `npm run dev`, visit `/login`, and log in with that account. Invalid passwords must fail; visiting `/practice` while logged out redirects to login. Logged-out API requests return 401, and users can only list/read/update their own transcripts.
+
 7. Add the same two environment variables to your deployment and rebuild. Set the Supabase Auth Site URL to your deployment URL and allow its `/auth/callback` redirect URL.
+
+### Practice sessions and account
+
+After login, optionally name your session and choose **Start practice session**. The app opens a distinct `/practice/<sessionId>` URL and keeps the same conversation while you move between activities.
+
+The **Account** menu provides **Session logs** (a “Coming soon” placeholder) and **Sign out**. The toolbar's **End session** returns to setup while keeping you signed in. Saved history and transcript downloads are deferred until database persistence is implemented.
+
+On Vercel, sessions automatically use browser mode: the active conversation stays in `sessionStorage` for the current tab, including across refreshes. No transcript files or database tables are required. Closing the tab clears that temporary conversation; opening a session URL in another tab does not restore it. Activity canvases and game state are still local to their components.
+
+Local development retains the existing JSON-file store in `data/transcripts` (or `TRANSCRIPT_DIR`) for development and API tests. Set `PRACTICE_STORAGE=browser` locally to test the hosted behavior. `PRACTICE_STORAGE=file` explicitly selects file mode and requires a writable persistent directory. Browser snapshots are temporary conversation context, not authoritative research or grading records.
 
 The integration uses cookie-based browser/server clients and Next.js 15 middleware for session refresh. Missing configuration blocks access. No secret or service-role key is required. Supabase's built-in email service has recipient restrictions and rate limits; configure [custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp) before offering signup beyond test users. See [Supabase's SSR guide](https://supabase.com/docs/guides/auth/server-side/creating-a-client).
 
@@ -39,7 +52,7 @@ The integration uses cookie-based browser/server clients and Next.js 15 middlewa
 
 Use `createClient` from `lib/supabase/client.ts` in browser components or `lib/supabase/server.ts` in server code for future Postgres queries. Before storing data, create versioned SQL migrations, enable Row Level Security on every exposed table, and write policies that compare `auth.uid()` with an `owner_id` referencing `auth.users(id)`. Generate database TypeScript types after the schema exists. Do not use editable user metadata to grant instructor/admin permissions.
 
-Transcripts still use local JSON files. New transcripts record the authenticated user's ID; older transcripts without an owner stay inaccessible through the API until explicitly migrated. No database tables or production Supabase project are created by this code change. File storage needs a persistent disk and one server process until the database migration is implemented.
+Database-backed session logs remain future work. Local file-mode transcripts record the authenticated user's ID; older ownerless logs remain inaccessible through the API. Browser-mode conversations are not uploaded to a database or saved as session logs. Future persistence must restore server-authoritative history before adding grading or audit features.
 
 ## Current features
 
@@ -47,9 +60,9 @@ Transcripts still use local JSON files. New transcripts record the authenticated
 - **Whiteboard:** Draw, erase, move objects, write text, and create shapes with labeled tools, ink colors, line sizes, undo, and redo. Excalidraw loads only in the browser.
 - **Feelings:** Select one of twelve feelings or draw over the board. Drawings have ink colors, undo, and clear controls.
 - **Chess:** Two players on the same device can click or drag pieces to legal destinations. Includes promotion, game-over detection, move history, undo, and reset.
-- **Chat:** Talk to Alex using an offline mock or a configured Anthropic/OpenAI provider. The server stores an ordered transcript of learner messages, client replies, and errors; transcripts can be downloaded as JSON or text.
+- **Chat:** Talk to Jacob using an offline mock or a configured Anthropic/OpenAI provider. Hosted conversations stay in the current browser tab; local file mode retains ordered transcripts for development. Saved logs and transcript downloads are coming later.
 
-Room positions, feelings drawings, whiteboard scenes, and chess games are local activity state and reset when leaving their routes. They are not yet synchronized or added to the session log. Settings, snapshot, and remote client control are prototype UI placeholders. End session signs out.
+Feelings drawings, whiteboard scenes, and chess games are local activity state and reset when leaving their routes. Room positions persist while the shared session shell stays mounted. Settings, snapshot, and remote client control are prototype UI placeholders. End session returns to setup; sign-out is available in Account.
 
 ## Checks
 

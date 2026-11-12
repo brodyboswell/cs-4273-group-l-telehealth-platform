@@ -66,7 +66,7 @@ export function LoginForm({ mode = "login" }: { mode?: "login" | "signup" }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+    <form method="post" onSubmit={handleSubmit} className="mt-6 space-y-4">
       <div>
         <label htmlFor="email" className="block text-sm font-medium text-charcoal">
           Email

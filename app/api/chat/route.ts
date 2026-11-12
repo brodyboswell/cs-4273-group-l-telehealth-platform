@@ -13,9 +13,11 @@ import {
 } from "@/lib/activities/registry";
 import type { ActivityAction, ActivityTurnEvent } from "@/lib/activities/types";
 import { DEFAULT_PERSONA } from "@/lib/chat/persona";
+import { usesBrowserSessions } from "@/lib/chat/storageMode";
 import {
   appendEntry,
-  getOrCreateTranscript,
+  getOwnedTranscript,
+  SessionEndedError,
   TranscriptAccessError,
   toChatHistory,
   withSessionLock,
@@ -23,6 +25,7 @@ import {
 import { jsonError } from "@/lib/chat/http";
 import {
   isRecord,
+  isTranscript,
   isValidSessionId,
   MAX_MESSAGE_LENGTH,
 } from "@/lib/chat/validation";
@@ -66,16 +69,34 @@ export async function POST(request: Request) {
   }
 
   let operation: ChatOperation;
+  const browserSession = usesBrowserSessions();
+  if (
+    browserSession &&
+    (!isTranscript(body.transcript) ||
+      body.transcript.sessionId !== sessionId ||
+      body.transcript.ownerId !== user.id ||
+      body.transcript.personaId !== DEFAULT_PERSONA.id)
+  )
+    return jsonError(
+      400,
+      "The practice conversation is unavailable. Start a new session.",
+    );
   if (body.activityTurn !== undefined) {
     if (body.message !== undefined || !isRecord(body.activityTurn))
-      return jsonError(400, "activityTurn requests cannot include a chat message.");
+      return jsonError(
+        400,
+        "activityTurn requests cannot include a chat message.",
+      );
     const turn = body.activityTurn;
     if (
       typeof turn.requestId !== "string" ||
       !("activity" in turn) ||
       !("event" in turn)
     )
-      return jsonError(400, "activityTurn must include its activity, requestId and event.");
+      return jsonError(
+        400,
+        "activityTurn must include its activity, requestId and event.",
+      );
     operation = {
       kind: "activity_turn",
       activity: turn.activity,
@@ -102,7 +123,9 @@ export async function POST(request: Request) {
       activeActivity = activityRegistry.resolve(operation.activity);
     if (operation.kind === "activity_turn") {
       if (!activeActivity)
-        throw new ActivityRegistryError("A client turn requires an active activity.");
+        throw new ActivityRegistryError(
+          "A client turn requires an active activity.",
+        );
       activityEvent = activityRegistry.validateTurnEvent(
         activeActivity.activityId,
         operation.requestId,
@@ -110,7 +133,9 @@ export async function POST(request: Request) {
         activeActivity.state,
       );
       if (!activeActivity.requiredToolName)
-        throw new ActivityRegistryError("No activity tool is available for this client turn.");
+        throw new ActivityRegistryError(
+          "No activity tool is available for this client turn.",
+        );
     }
   } catch (err) {
     return jsonError(
@@ -123,7 +148,14 @@ export async function POST(request: Request) {
 
   try {
     const result = await withSessionLock(sessionId, async () => {
-      const transcript = await getOrCreateTranscript(sessionId, DEFAULT_PERSONA, user.id);
+      // Browser history is temporary prototype context, not an authoritative audit log.
+      const transcript = browserSession
+        ? (body.transcript as Transcript)
+        : await getOwnedTranscript(sessionId, user.id);
+      if (transcript.endedAt)
+        throw new SessionEndedError(
+          "This session has ended. Start a new practice session to continue.",
+        );
       if (operation.kind === "activity_turn") {
         const cachedReply = transcript.entries.find(
           (entry) =>
@@ -154,14 +186,19 @@ export async function POST(request: Request) {
       let learnerEntry: TranscriptEntry | undefined;
       let activityEntry: TranscriptEntry | undefined;
       if (operation.kind === "message") {
-        learnerEntry = await appendEntry(transcript, "learner", operation.text, {
-          activity: activeActivity
-            ? {
-                activityId: activeActivity.activityId,
-                state: activeActivity.state,
-              }
-            : null,
-        });
+        learnerEntry = await appendEntry(
+          transcript,
+          "learner",
+          operation.text,
+          {
+            activity: activeActivity
+              ? {
+                  activityId: activeActivity.activityId,
+                  state: activeActivity.state,
+                }
+              : null,
+          },
+        );
       } else {
         activityEntry = transcript.entries.find(
           (entry) => entry.activityEvent?.requestId === operation.requestId,
@@ -260,7 +297,8 @@ export async function POST(request: Request) {
                 : {}),
             });
           }
-          const msg = "The virtual client did not return one valid activity action.";
+          const msg =
+            "The virtual client did not return one valid activity action.";
           await appendEntry(transcript, "system", msg);
           return { ok: false as const, status: 502, msg };
         }
@@ -277,7 +315,8 @@ export async function POST(request: Request) {
           reply.text.trim() ||
           actionClientText(actions) ||
           toolOnlyFallback;
-        if (!replyText) throw new LlmError("The virtual client returned an empty reply.");
+        if (!replyText)
+          throw new LlmError("The virtual client returned an empty reply.");
 
         const replyEntry = await appendEntry(
           transcript,
@@ -330,12 +369,21 @@ export async function POST(request: Request) {
       }
     });
 
-    if (!result.ok) return jsonError(result.status, result.msg);
+    if (!result.ok)
+      return Response.json(
+        {
+          error: result.msg,
+          ...(browserSession ? { transcript: body.transcript } : {}),
+        },
+        { status: result.status, headers: { "cache-control": "no-store" } },
+      );
     return Response.json(result.body, {
       headers: { "cache-control": "no-store" },
     });
   } catch (err) {
-    if (err instanceof TranscriptAccessError) return jsonError(404, "Transcript not found.");
+    if (err instanceof SessionEndedError) return jsonError(409, err.message);
+    if (err instanceof TranscriptAccessError)
+      return jsonError(404, "Transcript not found.");
     console.error("[chat] transcript storage error:", err);
     return jsonError(500, "Could not save the transcript.");
   }
@@ -350,7 +398,9 @@ async function ensureAvailabilityNotice(
 
   const previousActivityEntry = [...transcript.entries]
     .reverse()
-    .find((entry) => entry.speaker === "learner" || entry.speaker === "activity");
+    .find(
+      (entry) => entry.speaker === "learner" || entry.speaker === "activity",
+    );
   const previousNotice = [...transcript.entries]
     .reverse()
     .find((entry) => entry.activityNotice)?.activityNotice;

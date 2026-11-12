@@ -1,8 +1,8 @@
 # Chat API & Session Transcripts
 
-The Chat activity (`/practice/chat`) lets the learner talk to the virtual client **Alex**.
+The Chat activity (`/practice/<sessionId>/chat`) lets the learner talk to the virtual client **Jacob**.
 Replies come from an LLM (Claude or OpenAI) guided by the persona in `lib/chat/persona.ts`.
-Every learner message and every client reply is written to a per-session transcript.
+Local file mode writes each exchange to a per-session transcript. Hosted browser mode returns the updated conversation to the browser without filesystem or database writes; the session-log UI is a placeholder.
 
 ## Setup
 
@@ -10,7 +10,7 @@ Every learner message and every client reply is written to a per-session transcr
 2. Put in **one** key:
    - `ANTHROPIC_API_KEY=...` (default model `claude-haiku-4-5`), or
    - `OPENAI_API_KEY=...` (default model `gpt-4o-mini`)
-3. `npm run dev`, open http://localhost:3000/practice/chat
+3. `npm run dev`, open http://localhost:3000/login, sign in, and start a practice session.
 
 With no key, the chat runs in **mock mode**: canned replies, no cost, useful for UI work.
 Force a provider with `LLM_PROVIDER=anthropic|openai|mock`.
@@ -29,8 +29,9 @@ ChatPanel (browser)  --POST /api/chat {sessionId, message, activity?}-->  app/ap
                      <-- {reply, learnerEntry, transcript} ------
 ```
 
-The conversation history always comes from the **server-side transcript**, not the browser.
-That makes the transcript the single source of truth for grading and research.
+Local file mode rebuilds conversation history from the stored server transcript. On Vercel (or with `PRACTICE_STORAGE=browser`), `POST /api/sessions` instead returns `{ sessionId, transcript }`. The browser stores that temporary snapshot in `sessionStorage` and includes it as `transcript` on every chat and activity-turn POST. The server checks its structure, session ID, owner, and persona before generating a reply. Updated snapshots are returned on success and after provider failures that appended conversation entries.
+
+Browser snapshots are not an authoritative audit or grading log. Reloading the same tab restores the conversation; closing the tab or opening the URL in another tab does not. Server transcript GET returns 404 and listing returns an empty array in browser mode. End session acknowledges completion, and the browser clears its active snapshot. The Account session-log page displays “Coming soon”.
 
 ## Activity context and tools
 
@@ -91,26 +92,30 @@ When an activity with tools becomes active, the server adds a short virtual-clie
 
 The feelings chart and whiteboard are registered examples. The feelings chart provides `select_mood`, validates the selected mood against `MOOD_OPTIONS`, and updates the selected card through the bridge. Chess can follow the same pattern through its own definition and handler.
 
-The whiteboard provides `replace_whiteboard_with_svg`. Its input contains a bounded SVG document and a short `spokenText` line. The server validates the action shape and size before recording it; the SVG sanitizer currently fails closed as a placeholder, and rendering the client SVG in Excalidraw is deferred. Learner-created marks remain local to the browser. Rejected activity actions show a generic alert in chat while their details remain in the server transcript.
+The whiteboard provides `replace_whiteboard_with_svg`. Its input contains a bounded SVG document and a short `spokenText` line. The server validates and sanitizes the SVG before recording the action; the browser also sanitizes it before rendering it in Excalidraw. Learner-created marks remain local to the browser. Rejected activity actions show a generic alert in chat while their details remain in the server transcript.
 
 ## Endpoints
 
 | Method | Path                                     | Purpose                                                                                                                                                                                                                                                                                             |
 | ------ | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | POST   | `/api/chat`                              | Learner chat body `{ "sessionId": "...", "message": "...", "activity?": { ... } }` → reply and transcript; or board-turn body `{ "sessionId": "...", "activityTurn": { "activity": { ... }, "requestId": "...", "event": { ... } } }` → activity event, required client tool action, and transcript |
-| GET    | `/api/transcripts/:sessionId`            | Transcript as JSON (creates the session and its opening line if it's new)                                                                                                                                                                                                                           |
+| POST   | `/api/sessions`                         | Start an owned session with `{ "requestId": "<UUID v4>", "name": "..." }`; returns `{ "sessionId": "..." }`. Reuse the request ID when retrying. Names are optional, trimmed, and limited to 100 characters. |
+| POST   | `/api/sessions/:sessionId/end`           | Complete an owned session; repeat requests are idempotent. Further chat writes return 409. |
+| GET    | `/api/transcripts/:sessionId`            | Existing owned transcript as JSON; missing sessions return 404 and are never created by reads. |
 | GET    | `/api/transcripts/:sessionId?format=txt` | Readable text transcript; add `&download=1` to download                                                                                                                                                                                                                                             |
-| GET    | `/api/transcripts`                       | List of all recorded sessions (newest first)                                                                                                                                                                                                                                                        |
+| GET    | `/api/transcripts`                       | The signed-in learner's recorded sessions (newest first), including optional name and completion timestamp. |
 
-Errors return `{ "error": "..." }` with status 400 (bad input), 413 (message > 2000 chars),
+All endpoints require authentication. Chat updates require a session previously created through the start endpoint. Errors return `{ "error": "..." }` with status 400 (bad input), 401 (not signed in), 404 (missing or another learner's session), 409 (session completed), 413 (message > 2000 chars),
 500 (missing key / storage), 502 (provider error, e.g. bad key or quota), 504 (timeout).
 
-Example:
+Example (supply authenticated cookies and replace `YOUR_SESSION_ID` with the returned ID):
 
 ```bash
+curl -X POST localhost:3000/api/sessions -H "content-type: application/json" \
+  -d '{"requestId":"d80a689e-031c-458e-b590-bd84443a574a","name":"Rapport practice"}'
 curl -X POST localhost:3000/api/chat -H "content-type: application/json" \
-  -d '{"sessionId":"demo-session-1","message":"Hi Alex, how are you doing today?"}'
-curl "localhost:3000/api/transcripts/demo-session-1?format=txt"
+  -d '{"sessionId":"YOUR_SESSION_ID","message":"Hi Jacob, how are you doing today?"}'
+curl "localhost:3000/api/transcripts/YOUR_SESSION_ID?format=txt"
 ```
 
 ## Transcript format
