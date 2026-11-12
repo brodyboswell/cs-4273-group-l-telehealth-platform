@@ -158,8 +158,11 @@ describe("transcript storage", () => {
 });
 
 describe("chat HTTP endpoints", () => {
-  before(() => {
+  before(async () => {
     mock.method(auth, "getUser", async () => ({ id: "learner-one" }));
+    // Chat now updates explicitly started sessions; it never creates them.
+    for (const id of ["private-auth-session", "api-session", "feelings-agent-session", "feelings-tool-only", "chess-turn-session", "chess-speech-session", "black-chess-session", "retry-chess-session"])
+      await getOrCreateTranscript(id, DEFAULT_PERSONA, "learner-one");
   });
   it("rejects logged-out requests before reading or writing transcripts", async (context) => {
     context.mock.method(auth, "getUser", async () => null);
@@ -188,6 +191,7 @@ describe("chat HTTP endpoints", () => {
     const listing = await getTranscripts();
     assert.deepEqual((await listing.json()).sessions, []);
     assert.deepEqual(await readTranscript(id), original);
+    await getOrCreateTranscript("second-owner-session", DEFAULT_PERSONA, "learner-two");
     assert.equal((await get("second-owner-session")).status, 200);
     const ownListing = await getTranscripts();
     assert.deepEqual((await ownListing.json()).sessions.map((row: { sessionId: string }) => row.sessionId), ["second-owner-session"]);

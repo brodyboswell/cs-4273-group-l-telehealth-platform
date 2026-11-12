@@ -42,6 +42,8 @@ export interface Transcript {
   /** Supabase user ID. Absent only on legacy prototype transcripts. */
   ownerId?: string;
   sessionId: string;
+  name?: string;
+  endedAt?: string;
   personaId: string;
   personaName: string;
   createdAt: string;
@@ -58,12 +60,14 @@ export interface ChatTurn {
 /** Body of POST /api/chat */
 export interface ChatMessageRequestBody {
   sessionId: string;
+  transcript?: Transcript;
   message: string;
   activity?: ActivitySnapshot;
 }
 
 export interface ActivityTurnRequestBody {
   sessionId: string;
+  transcript?: Transcript;
   activityTurn: {
     activity: ActivitySnapshot;
     requestId: string;
@@ -71,9 +75,7 @@ export interface ActivityTurnRequestBody {
   };
 }
 
-export type ChatRequestBody =
-  | ChatMessageRequestBody
-  | ActivityTurnRequestBody;
+export type ChatRequestBody = ChatMessageRequestBody | ActivityTurnRequestBody;
 
 /** Successful response of POST /api/chat */
 export interface ChatResponseBody {

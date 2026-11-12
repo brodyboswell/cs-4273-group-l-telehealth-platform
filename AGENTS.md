@@ -118,6 +118,30 @@ public/                      # Static images and avatars
 
 *Append-only. Add new entries at the top.*
 
+**2026-11-12 — Ship setup with deferred session logs**
+Context: The user wants to push the intermission UI themselves and defer saved logs until later. Vercel cannot use the prototype's project-local JSON writes.
+Decision: Session logs is a Coming soon page; transcript download controls are hidden. Vercel automatically uses browser sessionStorage for the active conversation. Start returns a temporary snapshot, chat validates its owner/session/persona and returns an updated snapshot, and End clears the tab's snapshot and returns to setup. Local file mode remains for development. PRACTICE_STORAGE=browser selects hosted behavior locally; file mode requires writable persistent storage.
+Rationale: Keeps setup, chat, activity navigation, and account sign-out usable without introducing database infrastructure or unreliable serverless temporary files.
+Gotcha: Browser snapshots are untrusted conversation context, not authoritative logs for grading or research. Database persistence and server-authoritative history remain deferred. Closing the tab discards its conversation; another tab cannot resume its URL. The user explicitly forbids committing or pushing for them.
+
+---
+
+**2026-11-12 — Separate development and production output**
+Context: A local practice page failed in Next.js's chunk URL loader after development and production commands shared `.next` output.
+Decision: Use `.next-dev` for the development-server phase and `.next` for production. Ignore both generated trees in Git and ESLint, and include both generated type directories in TypeScript.
+Rationale: A production build must not replace the JavaScript chunks and manifests of a running development server.
+Gotcha: Reload browser tabs after restarting development to discard their previous chunk mappings. Do not run multiple development servers against the same output directory.
+
+---
+
+**2026-11-12 — Explicit practice-session lifecycle and account logs**
+Context: Automatically created chat IDs made session boundaries implicit, and End session signed the learner out.
+Decision: Sign-in and confirmation now open `/sessions/new`. An authenticated, retry-safe start POST creates a named transcript; practice URLs include the session ID in `/practice/[sessionId]`. The shared shell consumes that ID across activities. Transcript GET and chat POST require existing owned sessions. End session records completion and returns to logs without signing out. A shared Account menu provides setup, session logs with transcript viewing/downloads, and sign-out.
+Rationale: Makes each practice attempt explicit and independently reviewable before a future database migration, while preserving the room shell and activity tools.
+Gotcha: Storage remains JSON files with process-local locks. Multi-instance persistence and full local activity-state recovery remain future work. Legacy owned transcripts remain readable; ownerless logs remain inaccessible through authenticated APIs. `/practice` redirects to setup, and the former activity URLs require an explicit session ID.
+
+---
+
 **2026-11-09 — Add self-service account creation**
 Context: Dashboard-provisioned accounts can sign in, but learners need a way to register in the app.
 Decision: Add `/signup` and a Create account link to login, reuse the account form with password confirmation, and call Supabase signup with the current origin's `/auth/callback`. Exchange the returned PKCE code server-side and redirect only to `/practice`; show a recoverable login error for invalid links.

@@ -1,5 +1,3 @@
-import { SessionShell } from "@/components/session/SessionShell";
-
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth/server";
 
@@ -12,5 +10,5 @@ export default async function PracticeLayout({
 }) {
   const user = await auth.getUser();
   if (!user) redirect("/login");
-  return <SessionShell key={user.id} userId={user.id}>{children}</SessionShell>;
+  return <>{children}</>;
 }

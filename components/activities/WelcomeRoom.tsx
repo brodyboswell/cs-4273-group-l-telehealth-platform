@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition, type PointerEvent } from "react";
 import { useRouter } from "next/navigation";
 import Image, { getImageProps } from "next/image";
+import { usePracticeSession } from "@/components/session/PracticeSession";
 import { useRoomState } from "@/components/session/RoomState";
 
 const ACTIVITIES = [
@@ -63,6 +64,7 @@ function boundedPosition(activity: Activity, x: number, y: number): Position {
 
 export function WelcomeRoom() {
   const router = useRouter();
+  const { practicePath } = usePracticeSession();
   const [isOpening, startOpening] = useTransition();
   const [openingId, setOpeningId] = useState<string | null>(null);
   const room = useRef<HTMLDivElement>(null);
@@ -131,8 +133,8 @@ export function WelcomeRoom() {
               aria-label={`Open ${activity.label}`}
               title={activity.label}
               aria-busy={isOpening && openingId === activity.id}
-              onPointerEnter={() => router.prefetch(`/practice/${activity.id}`)}
-              onFocus={() => router.prefetch(`/practice/${activity.id}`)}
+              onPointerEnter={() => router.prefetch(`${practicePath}/${activity.id}`)}
+              onFocus={() => router.prefetch(`${practicePath}/${activity.id}`)}
               className={`group absolute touch-none rounded-lg focus-visible:outline focus-visible:outline-4 focus-visible:outline-sage ${draggingId === activity.id ? "z-20 cursor-grabbing" : "cursor-pointer"}`}
               style={{
                 left: `${position.x}%`,
@@ -170,7 +172,7 @@ export function WelcomeRoom() {
                 }
                 if (isOpening) return;
                 setOpeningId(activity.id);
-                startOpening(() => router.push(`/practice/${activity.id}`));
+                startOpening(() => router.push(`${practicePath}/${activity.id}`));
               }}
               onKeyDown={(event) => {
                 const offset = KEY_OFFSETS[event.key];
