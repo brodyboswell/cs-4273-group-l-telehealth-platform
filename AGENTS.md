@@ -1,5 +1,5 @@
 # AGENTS.md
-> Last updated: 2026-11-06
+> Last updated: 2026-11-12
 
 ## Project Overview
 
@@ -52,6 +52,7 @@ lib/activities/              # Activity definitions, validation, tools, and regi
 docs/                        # Architecture and UI prototype references
 unit-tests/                  # Cross-stack unit-test exercises
 public/                      # Static images and avatars
+voice-agent/                 # Separate Python process: realtime voice AI (LiveKit Agents)
 ```
 
 **Key dependencies:**
@@ -61,6 +62,8 @@ public/                      # Static images and avatars
 | React | 19.x | UI components |
 | Tailwind CSS | 3.x | Existing visual system |
 | Excalidraw | 0.18.1 | Drop-in client-side whiteboard editor |
+| livekit-client / livekit-server-sdk | 2.x | Browser realtime voice connection + server-side join tokens |
+| livekit-agents (Python, `voice-agent/`) | 1.8.x | Realtime voice agent framework (mentor-provided open source) |
 
 ---
 
@@ -117,6 +120,22 @@ public/                      # Static images and avatars
 ## Decisions & Gotchas Log
 
 *Append-only. Add new entries at the top.*
+
+**2026-11-12 — Share activity context with the voice agent through the existing ActivityBridge**
+Context: The mentor asked for the voice agent to understand the interactive activities, starting with Jacob reacting to the learner's feelings-chart selections, and suggested each student keep their own component behind a common interface.
+Decision: Reuse `useActivityTools`/`ActivityBridge` and the activity registry as that interface. During a call, `VoicePanel` polls `capture()` every 500 ms and sends the snapshot on the LiveKit topic `telehealth.activity` when it changes (and again when the agent joins). The agent posts it to `POST /api/voice/activity`, which validates and describes it with the registry, and with `record: true` appends an `activity` transcript entry under the session lock. The agent adds that context to Jacob's instructions; for activities in `REACTIVE_ACTIVITIES` (only `feelings`) a learner change also triggers a short spoken reaction. Structured interaction records were chosen over periodic screenshots for precision, latency, cost, and to avoid sending the learner's whole screen to a third party; screenshots remain an option for whiteboard drawings.
+Rationale: No activity-specific code in the voice path and no change to the bridge interface the activity components use; validation stays in one place.
+Gotcha: Polling was chosen over adding a change subscription to the bridge to avoid touching every activity. Jacob has no activity tools in voice mode yet, so his instructions tell him not to claim actions. The agent now re-reads the transcript before each append, but the Python and Next.js processes still share no lock. Speech-to-text switched from `multi` to `en` after misrecognitions.
+
+---
+
+**2026-10-28 — Realtime voice via LiveKit Agents, sharing the existing transcript**
+Context: The mentor asked for a realtime voice AI agent (mic in, spoken client reply out) that writes to the same chat log as the Text tab, based on the open-source `livekit/agents` framework.
+Decision: Add a `voice-agent/` Python process using LiveKit Agents with a LiveKit Cloud project. `voice-agent/transcript_store.py` mirrors `lib/chat/transcriptStore.ts` (same JSON shape and folder) so a session can move between Text and Voice. The agent fetches the persona from `GET /api/persona`; `POST /api/livekit-token` mints short-lived join tokens so the browser never sees `LIVEKIT_API_SECRET`. A Text/Voice toggle in `SessionShell` mounts `ChatPanel` and `VoicePanel` together so a call survives tab switches. STT/TTS use LiveKit Inference; the LLM stays Anthropic. See `docs/voice-agent.md`.
+Rationale: One authoritative transcript per session regardless of mode, one persona definition, no extra LLM vendor.
+Gotcha: `voice-agent/transcript_store.py` must be updated by hand if the transcript shape changes in `lib/chat/`. Running voice needs two processes (`npm run dev` and `python agent.py dev`).
+
+---
 
 **2026-11-06 — Animate client SVG strokes before image insertion**
 Context: The client drawing appeared all at once when its Excalidraw image was inserted.

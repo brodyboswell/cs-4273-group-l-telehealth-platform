@@ -1,0 +1,10 @@
+# Realtime voice AI agent for the telehealth practice room.
+# Install with:   pip install -r requirements.txt   (inside voice-agent/.venv)
+#
+# livekit-agents: the mentor's open-source framework (livekit/agents on GitHub).
+# livekit-plugins-anthropic: lets the agent use the same Claude models the
+#   text chat already uses, via ANTHROPIC_API_KEY. STT/TTS come from LiveKit
+#   Inference (bundled in livekit-agents, no extra package needed).
+livekit-agents>=1.8.9
+livekit-plugins-anthropic>=1.8.9
+python-dotenv>=1.0.0

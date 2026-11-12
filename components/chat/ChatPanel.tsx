@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   isRecord,
   isTranscript,
-  isValidSessionId,
   MAX_MESSAGE_LENGTH,
 } from "@/lib/chat/validation";
 import type {
@@ -17,36 +16,11 @@ import {
   useActivityBridge,
   type ActivityTurnDispatchRequest,
 } from "@/components/session/ActivityBridge";
-
-const SESSION_STORAGE_KEY = "telehealth.practiceSessionId";
-
-function newSessionId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto)
-    return crypto.randomUUID();
-  return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-/** Keeps the same session while the learner moves between activities in one tab. */
-function loadSessionId(): string {
-  try {
-    const saved = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
-    if (isValidSessionId(saved)) return saved;
-
-    const created = newSessionId();
-    window.sessionStorage.setItem(SESSION_STORAGE_KEY, created);
-    return created;
-  } catch {
-    return newSessionId();
-  }
-}
-
-function saveSessionId(id: string) {
-  try {
-    window.sessionStorage.setItem(SESSION_STORAGE_KEY, id);
-  } catch {
-    // Storage can be blocked (private mode); the session still works for this page view.
-  }
-}
+import {
+  loadSessionId,
+  newSessionId,
+  saveSessionId,
+} from "@/lib/chat/clientSession";
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString([], {
