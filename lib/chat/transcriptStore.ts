@@ -14,6 +14,8 @@ import { isValidSessionId, isTranscript } from "./validation";
 import type { Persona } from "./persona";
 import type { ChatTurn, Speaker, Transcript, TranscriptEntry } from "./types";
 
+export class TranscriptAccessError extends Error {}
+
 function transcriptDir(): string {
   return path.resolve(
     process.env.TRANSCRIPT_DIR ||
@@ -82,12 +84,19 @@ export function withSessionLock<T>(
 export async function getOrCreateTranscript(
   sessionId: string,
   persona: Persona,
+  ownerId?: string,
 ): Promise<Transcript> {
   const existing = await readTranscript(sessionId);
-  if (existing) return existing;
+  if (existing) {
+    // Legacy transcripts are never automatically claimed by a new login.
+    if (ownerId !== undefined && existing.ownerId !== ownerId)
+      throw new TranscriptAccessError("Transcript not found.");
+    return existing;
+  }
   const now = new Date().toISOString();
   const t: Transcript = {
     sessionId,
+    ...(ownerId !== undefined ? { ownerId } : {}),
     personaId: persona.id,
     personaName: persona.name,
     createdAt: now,
@@ -182,7 +191,7 @@ export function toChatHistory(t: Transcript): ChatTurn[] {
   return turns;
 }
 
-export async function listTranscripts(): Promise<
+export async function listTranscripts(ownerId?: string): Promise<
   Array<
     Pick<
       Transcript,
@@ -214,7 +223,7 @@ export async function listTranscripts(): Promise<
         .map((file) => readTranscript(file.slice(0, -5))),
     );
     for (const transcript of batch) {
-      if (transcript)
+      if (transcript && (ownerId === undefined || transcript.ownerId === ownerId))
         rows.push({
           sessionId: transcript.sessionId,
           personaName: transcript.personaName,

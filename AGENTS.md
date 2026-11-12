@@ -14,7 +14,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`; the app redirects to `/practice`.
+Configure Supabase using `.env.example` and README.md. Open `http://localhost:3000`; the app redirects to `/login`.
 
 **Tests and checks:**
 ```bash
@@ -117,6 +117,22 @@ public/                      # Static images and avatars
 ## Decisions & Gotchas Log
 
 *Append-only. Add new entries at the top.*
+
+**2026-11-09 — Add self-service account creation**
+Context: Dashboard-provisioned accounts can sign in, but learners need a way to register in the app.
+Decision: Add `/signup` and a Create account link to login, reuse the account form with password confirmation, and call Supabase signup with the current origin's `/auth/callback`. Exchange the returned PKCE code server-side and redirect only to `/practice`; show a recoverable login error for invalid links.
+Rationale: Email verification remains controlled by Supabase, and unconfirmed users receive no practice access. No user metadata grants elevated roles.
+Gotcha: Enable signups and allow each environment's callback URL in Supabase. Keep the default `ConfirmationURL` email template and open confirmation links in the signup browser. The default email service restricts recipients; configure SMTP for broader use. Password recovery and instructor roles remain future work.
+
+---
+
+**2026-11-09 — Replace mock login with Supabase Auth**
+Context: Practice routes and transcript APIs need authentication before adding database persistence.
+Decision: Use `@supabase/ssr` browser/server clients, email/password login, real logout, and Next.js 15 middleware for cookie refresh. Verify identity server-side and gate each API independently. Record transcript owner IDs and enforce ownership for reads, listing, and chat updates.
+Rationale: Establishes authentication and learner-level authorization while keeping reusable clients for future Supabase Postgres queries.
+Gotcha: Configure the project URL/publishable key and provision a confirmed user before signing in. No service-role key is needed. Legacy ownerless transcripts cannot be claimed through the API. File storage and process-local locking remain until a separate database migration. Signup, password recovery, and instructor roles are not implemented.
+
+---
 
 **2026-11-06 — Animate client SVG strokes before image insertion**
 Context: The client drawing appeared all at once when its Excalidraw image was inserted.

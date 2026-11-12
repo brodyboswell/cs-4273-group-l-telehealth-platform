@@ -1,7 +1,6 @@
+import { auth } from "@/lib/auth/server";
 /**
- * GET /api/transcripts -> list of recorded sessions (newest first), for instructors
- * and researchers. NOTE: there is no login yet, so anyone who can reach the server
- * can list and read transcripts. Add authentication before any real deployment.
+ * GET /api/transcripts -> the authenticated learner's sessions, newest first.
  */
 import { jsonError } from "@/lib/chat/http";
 import { listTranscripts } from "@/lib/chat/transcriptStore";
@@ -10,9 +9,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const user = await auth.getUser();
+  if (!user) return jsonError(401, "Please log in to continue.");
   try {
     return Response.json(
-      { sessions: await listTranscripts() },
+      { sessions: await listTranscripts(user.id) },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {

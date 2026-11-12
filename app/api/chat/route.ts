@@ -1,3 +1,4 @@
+import { auth } from "@/lib/auth/server";
 /**
  * POST /api/chat accepts a learner message or an activity-triggered client turn.
  * Conversation history always comes from the ordered server transcript.
@@ -15,6 +16,7 @@ import { DEFAULT_PERSONA } from "@/lib/chat/persona";
 import {
   appendEntry,
   getOrCreateTranscript,
+  TranscriptAccessError,
   toChatHistory,
   withSessionLock,
 } from "@/lib/chat/transcriptStore";
@@ -44,6 +46,8 @@ type ChatOperation =
     };
 
 export async function POST(request: Request) {
+  const user = await auth.getUser();
+  if (!user) return jsonError(401, "Please log in to continue.");
   let body: unknown;
   try {
     body = await request.json();
@@ -119,7 +123,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await withSessionLock(sessionId, async () => {
-      const transcript = await getOrCreateTranscript(sessionId, DEFAULT_PERSONA);
+      const transcript = await getOrCreateTranscript(sessionId, DEFAULT_PERSONA, user.id);
       if (operation.kind === "activity_turn") {
         const cachedReply = transcript.entries.find(
           (entry) =>
@@ -331,6 +335,7 @@ export async function POST(request: Request) {
       headers: { "cache-control": "no-store" },
     });
   } catch (err) {
+    if (err instanceof TranscriptAccessError) return jsonError(404, "Transcript not found.");
     console.error("[chat] transcript storage error:", err);
     return jsonError(500, "Could not save the transcript.");
   }

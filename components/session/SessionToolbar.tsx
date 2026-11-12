@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Icon } from "@/components/ui/Icon";
-import { signOut } from "@/lib/auth/mockAuth";
+import { signOut } from "@/lib/auth/supabaseAuth";
 
 function ToolbarLink({
   href,
@@ -79,9 +79,20 @@ function ClientControlToggle() {
 export function SessionToolbar() {
   const router = useRouter();
 
+  const [signingOut, setSigningOut] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   async function handleEndSession() {
-    const { redirectTo } = await signOut();
-    router.replace(redirectTo);
+    setSigningOut(true);
+    setError(null);
+    try {
+      const { redirectTo } = await signOut();
+      router.replace(redirectTo);
+      router.refresh();
+    } catch {
+      setError("Could not sign out. Please try again.");
+      setSigningOut(false);
+    }
   }
 
   return (
@@ -108,6 +119,7 @@ export function SessionToolbar() {
         <ToolbarItem icon={<Icon name="camera" />} label="Snapshot" />
       </div>
 
+      {error && <p role="alert" className="text-sm text-terracotta">{error}</p>}
       <div className="flex min-w-0 items-center justify-end gap-2 overflow-hidden">
         <ToolbarLink
           href="/practice/chat"
@@ -117,6 +129,7 @@ export function SessionToolbar() {
         <button
           type="button"
           onClick={handleEndSession}
+          disabled={signingOut}
           aria-label="End session"
           title="End session"
           className="flex shrink-0 items-center gap-2 rounded-panel bg-terracotta px-3 py-2 text-sm font-medium text-white hover:bg-terracotta/90"
