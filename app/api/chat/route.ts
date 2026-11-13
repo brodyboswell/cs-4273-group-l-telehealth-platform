@@ -12,7 +12,7 @@ import {
   type ResolvedActivity,
 } from "@/lib/activities/registry";
 import type { ActivityAction, ActivityTurnEvent } from "@/lib/activities/types";
-import { DEFAULT_PERSONA } from "@/lib/chat/persona";
+import { personaForTranscript } from "@/lib/chat/clientPersona";
 import { usesBrowserSessions } from "@/lib/chat/storageMode";
 import {
   appendEntry,
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
     (!isTranscript(body.transcript) ||
       body.transcript.sessionId !== sessionId ||
       body.transcript.ownerId !== user.id ||
-      body.transcript.personaId !== DEFAULT_PERSONA.id)
+      body.transcript.personaId !== personaForTranscript(body.transcript).id)
   )
     return jsonError(
       400,
@@ -229,7 +229,7 @@ export async function POST(request: Request) {
             ? "This is your turn in the active activity. Make exactly one required tool call. The platform will create the client-facing line from the validated action."
             : null;
         const systemPrompt = [
-          DEFAULT_PERSONA.systemPrompt,
+          personaForTranscript(transcript).systemPrompt,
           activityContext,
           turnInstruction,
         ]

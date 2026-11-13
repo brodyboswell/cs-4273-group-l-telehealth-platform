@@ -44,6 +44,7 @@ export default async function ActivePracticeLayout({
       sessionId={sessionId}
       userId={user.id}
       name={transcript.name || `Practice with ${transcript.personaName}`}
+      client={transcript.client}
     >
       {children}
     </SessionShell>

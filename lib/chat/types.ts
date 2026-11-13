@@ -12,6 +12,7 @@ import type {
   ActivitySnapshot,
   ActivityTurnEvent,
 } from "@/lib/activities/types";
+import type { VirtualClient } from "./clientProfile";
 
 export type Speaker = "learner" | "virtual_client" | "system" | "activity";
 
@@ -46,6 +47,8 @@ export interface Transcript {
   endedAt?: string;
   personaId: string;
   personaName: string;
+  /** Learner-created client; absent on sessions that use the default persona. */
+  client?: VirtualClient;
   createdAt: string;
   updatedAt: string;
   entries: TranscriptEntry[];

@@ -3,6 +3,7 @@ import { jsonError } from "@/lib/chat/http";
 import { createPracticeSession } from "@/lib/chat/transcriptStore";
 import { isRecord, MAX_SESSION_NAME_LENGTH } from "@/lib/chat/validation";
 import { usesBrowserSessions } from "@/lib/chat/storageMode";
+import { parseVirtualClient } from "@/lib/chat/clientProfile";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,11 +34,19 @@ export async function POST(request: Request) {
       400,
       `Session names must be ${MAX_SESSION_NAME_LENGTH} characters or fewer.`,
     );
+  const client =
+    body.client === undefined ? undefined : parseVirtualClient(body.client);
+  if (client === null)
+    return jsonError(
+      400,
+      "The virtual client profile is incomplete or invalid. Go back and check each field.",
+    );
   try {
     const transcript = await createPracticeSession(
       user.id,
       typeof body.name === "string" ? body.name.trim() : "",
       body.requestId,
+      client,
     );
     return Response.json(
       {

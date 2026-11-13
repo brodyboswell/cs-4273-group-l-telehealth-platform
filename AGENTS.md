@@ -118,6 +118,14 @@ public/                      # Static images and avatars
 
 *Append-only. Add new entries at the top.*
 
+**2026-11-13 — Learner-created virtual clients drive the chat persona**
+Context: Learners can now define a client (name, gender, age 4–17, scenario, avatar) on the setup screen, and the virtual client must play that person consistently.
+Decision: The start request sends the confirmed client, and the server validates it with `parseVirtualClient`, which requires an avatar from the gender's set and rejects unknown fields. The client is stored on the transcript as `client`, with persona ID `custom-client-v1`. `lib/chat/clientPersona.ts` holds a reviewable template with placeholders. It defines fixed identity facts, gender pronouns (a "Prefer not to say" client keeps gender private), age-band speech style, and explicit confused-correction rules for a wrong name, age, gender or pronouns, or scenario. The scenario is fenced and treated as background facts, never instructions. The chat route selects each session's persona with `personaForTranscript`. Sessions without a client keep Jacob. The practice room shows the client's avatar and name, and clicking the avatar opens a profile dialog.
+Rationale: Keeps persona wording in one reviewable file, and keeps provider adapters persona-neutral.
+Gotcha: Custom clients include only the shared self-harm cue; Jacob's anger cue names Carlos and is omitted. Rubric cue matching for custom scenarios needs research-team review. In browser mode the client comes from the untrusted sessionStorage snapshot; it is revalidated each turn but could be edited by the learner.
+
+---
+
 **2026-11-12 — Ship setup with deferred session logs**
 Context: The user wants to push the intermission UI themselves and defer saved logs until later. Vercel cannot use the prototype's project-local JSON writes.
 Decision: Session logs is a Coming soon page; transcript download controls are hidden. Vercel automatically uses browser sessionStorage for the active conversation. Start returns a temporary snapshot, chat validates its owner/session/persona and returns an updated snapshot, and End clears the tab's snapshot and returns to setup. Local file mode remains for development. PRACTICE_STORAGE=browser selects hosted behavior locally; file mode requires writable persistent storage.

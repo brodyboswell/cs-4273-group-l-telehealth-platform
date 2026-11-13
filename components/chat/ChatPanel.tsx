@@ -16,6 +16,7 @@ import {
   saveBrowserSession,
 } from "@/lib/chat/browserSession";
 import { waitForMinimumThinkTime } from "@/lib/chat/thinkDelay";
+import { usePracticeSession } from "@/components/session/PracticeSession";
 import {
   useActivityBridge,
   type ActivityTurnDispatchRequest,
@@ -41,7 +42,7 @@ export function ChatPanel({
 }) {
   const activityBridge = useActivityBridge();
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
-  const [clientName, setClientName] = useState("Jacob");
+  const clientName = usePracticeSession().client.name;
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -63,7 +64,6 @@ export function ChatPanel({
       if (browserSession) saveBrowserSession(transcript);
       transcriptRef.current = transcript;
       setEntries(transcript.entries);
-      setClientName(transcript.personaName);
     },
     [browserSession],
   );
