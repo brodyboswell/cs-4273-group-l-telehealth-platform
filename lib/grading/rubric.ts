@@ -51,9 +51,8 @@ export const CRITERIA: RubricCriterion[] = [
   {
     id: "questioning_style",
     name: "Questioning style",
-    evidence: "hybrid",
-    focus:
-      "Uses open questions, one at a time. The LLM labels each learner turn open or closed; code computes the ratio.",
+    evidence: "llm",
+    focus: "Uses open questions that invite elaboration, one at a time.",
     levels: [
       { score: 0, descriptor: "Not shown." },
       { score: 1, descriptor: "Mostly closed yes/no questions." },
@@ -166,5 +165,5 @@ export interface RiskCue {
   /** Must match the line in the persona system prompt exactly. */
   text: string;
 }
- 
+
 export const RISK_CUES: RiskCue[] = [];

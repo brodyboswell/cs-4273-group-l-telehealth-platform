@@ -5,8 +5,17 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { usePracticeSession } from "./PracticeSession";
-import { clearBrowserSession } from "@/lib/chat/browserSession";
+import {
+  clearBrowserSession,
+  loadBrowserSession,
+} from "@/lib/chat/browserSession";
 import { isRecord } from "@/lib/chat/validation";
+import type { GradeReport } from "@/lib/grading/types";
+import {
+  isGradeReport,
+  SessionFeedback,
+  type FeedbackPhase,
+} from "./SessionFeedback";
 
 function ToolbarLink({
   href,
@@ -80,10 +89,55 @@ function ClientControlToggle() {
 
 export function SessionToolbar() {
   const router = useRouter();
-  const { sessionId, practicePath, browserSession } = usePracticeSession();
+  const { sessionId, practicePath, browserSession, userId } =
+    usePracticeSession();
 
   const [ending, setEnding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [feedbackPhase, setFeedbackPhase] = useState<FeedbackPhase | null>(
+    null,
+  );
+  const [report, setReport] = useState<GradeReport | null>(null);
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+
+  /** Asks for feedback before the session ends, because ending clears a hosted session. */
+  async function requestFeedback() {
+    setFeedbackPhase("grading");
+    setFeedbackMessage(null);
+    try {
+      let body: string | undefined;
+      if (browserSession) {
+        const transcript = loadBrowserSession(sessionId, userId);
+        // Nothing to grade; end the session without feedback.
+        if (!transcript) {
+          setFeedbackPhase(null);
+          await handleEndSession();
+          return;
+        }
+        body = JSON.stringify({ transcript });
+      }
+      const response = await fetch(`/api/sessions/${sessionId}/grade`, {
+        method: "POST",
+        ...(body ? { body } : {}),
+      });
+      const data: unknown = await response.json().catch(() => null);
+      if (!response.ok || !isRecord(data) || !isGradeReport(data.report))
+        throw new Error(
+          isRecord(data) && typeof data.error === "string"
+            ? data.error
+            : "We couldn’t generate feedback for this session.",
+        );
+      setReport(data.report);
+      setFeedbackPhase("feedback");
+    } catch (error) {
+      setFeedbackMessage(
+        error instanceof Error
+          ? error.message
+          : "We couldn’t generate feedback for this session.",
+      );
+      setFeedbackPhase("failed");
+    }
+  }
 
   async function handleEndSession() {
     if (ending) return;
@@ -104,65 +158,78 @@ export function SessionToolbar() {
       router.replace("/sessions/new");
       router.refresh();
     } catch (error) {
-      setError(
+      const message =
         error instanceof Error
           ? error.message
-          : "Could not end your session. Please try again.",
-      );
+          : "Could not end your session. Please try again.";
+      setError(message);
+      setFeedbackMessage(message);
       setEnding(false);
     }
   }
 
   return (
-    <footer className="flex h-16 shrink-0 justify-between gap-4 items-center overflow-hidden border-t border-charcoal/15 bg-white px-4">
-      <div className="flex min-w-0 items-center justify-start gap-0.5 overflow-hidden">
-        <ToolbarLink
-          href={`${practicePath}/settings`}
-          icon={<Icon name="settings" />}
-          label="Settings"
-        />
-        <Divider />
-        <ClientControlToggle />
-        <Divider />
-        <Link
-          href={practicePath}
-          aria-label="Activities"
-          title="Activities"
-          className="flex shrink-0 items-center gap-2 px-2 py-1 text-sm text-charcoal hover:opacity-70"
-        >
-          <Icon name="activities" />
-          <span className="hidden sm:inline">Activities</span>
-        </Link>
-        <Divider />
-        <ToolbarItem icon={<Icon name="camera" />} label="Snapshot" />
-      </div>
+    <>
+      <footer className="flex h-16 shrink-0 justify-between gap-4 items-center overflow-hidden border-t border-charcoal/15 bg-white px-4">
+        <div className="flex min-w-0 items-center justify-start gap-0.5 overflow-hidden">
+          <ToolbarLink
+            href={`${practicePath}/settings`}
+            icon={<Icon name="settings" />}
+            label="Settings"
+          />
+          <Divider />
+          <ClientControlToggle />
+          <Divider />
+          <Link
+            href={practicePath}
+            aria-label="Activities"
+            title="Activities"
+            className="flex shrink-0 items-center gap-2 px-2 py-1 text-sm text-charcoal hover:opacity-70"
+          >
+            <Icon name="activities" />
+            <span className="hidden sm:inline">Activities</span>
+          </Link>
+          <Divider />
+          <ToolbarItem icon={<Icon name="camera" />} label="Snapshot" />
+        </div>
 
-      {error && (
-        <p role="alert" className="text-sm text-terracotta">
-          {error}
-        </p>
-      )}
-      <div className="flex min-w-0 items-center justify-end gap-2 overflow-hidden">
-        <ToolbarLink
-          href={`${practicePath}/chat`}
-          icon={<Icon name="chat" />}
-          label="Chat"
+        {error && (
+          <p role="alert" className="text-sm text-terracotta">
+            {error}
+          </p>
+        )}
+        <div className="flex min-w-0 items-center justify-end gap-2 overflow-hidden">
+          <ToolbarLink
+            href={`${practicePath}/chat`}
+            icon={<Icon name="chat" />}
+            label="Chat"
+          />
+          <button
+            type="button"
+            onClick={requestFeedback}
+            disabled={ending || feedbackPhase !== null}
+            aria-busy={ending}
+            aria-label="End session"
+            title="End session"
+            className="flex shrink-0 items-center gap-2 rounded-panel bg-terracotta px-3 py-2 text-sm font-medium text-white hover:bg-terracotta/90"
+          >
+            <Icon name="phone" />
+            <span className="hidden sm:inline">
+              {ending || feedbackPhase === "grading" ? "Ending…" : "End session"}
+            </span>
+          </button>
+        </div>
+      </footer>
+      {feedbackPhase && (
+        <SessionFeedback
+          phase={feedbackPhase}
+          report={report}
+          message={feedbackMessage}
+          finishing={ending}
+          onFinish={handleEndSession}
+          onRetry={requestFeedback}
         />
-        <button
-          type="button"
-          onClick={handleEndSession}
-          disabled={ending}
-          aria-busy={ending}
-          aria-label="End session"
-          title="End session"
-          className="flex shrink-0 items-center gap-2 rounded-panel bg-terracotta px-3 py-2 text-sm font-medium text-white hover:bg-terracotta/90"
-        >
-          <Icon name="phone" />
-          <span className="hidden sm:inline">
-            {ending ? "Ending…" : "End session"}
-          </span>
-        </button>
-      </div>
-    </footer>
+      )}
+    </>
   );
 }

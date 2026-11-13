@@ -38,6 +38,12 @@ export interface LlmReply {
   toolCalls: LlmToolCall[];
 }
 
+/** Per-call overrides, e.g. a longer, deterministic structured response for grading. */
+export interface LlmCallOptions {
+  maxOutputTokens?: number;
+  temperature?: number;
+}
+
 export class LlmError extends Error {
   constructor(
     message: string,
@@ -80,13 +86,28 @@ export async function generateClientReply(
   env: ProviderEnvironment = process.env,
   tools: readonly LlmToolDefinition[] = [],
   requiredToolName?: string,
+  options: LlmCallOptions = {},
 ): Promise<LlmReply> {
   const provider = resolveProvider(env);
   switch (provider) {
     case "anthropic":
-      return callAnthropic(systemPrompt, history, env, tools, requiredToolName);
+      return callAnthropic(
+        systemPrompt,
+        history,
+        env,
+        tools,
+        requiredToolName,
+        options,
+      );
     case "openai":
-      return callOpenAI(systemPrompt, history, env, tools, requiredToolName);
+      return callOpenAI(
+        systemPrompt,
+        history,
+        env,
+        tools,
+        requiredToolName,
+        options,
+      );
     case "mock":
       return mockReply(history, tools, requiredToolName);
   }
@@ -145,17 +166,22 @@ async function callAnthropic(
   env: ProviderEnvironment,
   tools: readonly LlmToolDefinition[],
   requiredToolName?: string,
+  options: LlmCallOptions = {},
 ): Promise<LlmReply> {
   const apiKey = requireKey(env.ANTHROPIC_API_KEY, "ANTHROPIC_API_KEY");
   const model = env.ANTHROPIC_MODEL || "claude-haiku-4-5";
   const maxOutputTokens =
-    tools.length > 0 ? MAX_TOOL_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS;
+    options.maxOutputTokens ??
+    (tools.length > 0 ? MAX_TOOL_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS);
   const data = await postJson(
     "https://api.anthropic.com/v1/messages",
     { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     {
       model,
       max_tokens: maxOutputTokens,
+      ...(options.temperature !== undefined
+        ? { temperature: options.temperature }
+        : {}),
       system: systemPrompt,
       messages: history,
       ...(tools.length > 0
@@ -207,17 +233,22 @@ async function callOpenAI(
   env: ProviderEnvironment,
   tools: readonly LlmToolDefinition[],
   requiredToolName?: string,
+  options: LlmCallOptions = {},
 ): Promise<LlmReply> {
   const apiKey = requireKey(env.OPENAI_API_KEY, "OPENAI_API_KEY");
   const model = env.OPENAI_MODEL || "gpt-4o-mini";
   const maxOutputTokens =
-    tools.length > 0 ? MAX_TOOL_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS;
+    options.maxOutputTokens ??
+    (tools.length > 0 ? MAX_TOOL_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS);
   const data = await postJson(
     "https://api.openai.com/v1/chat/completions",
     { authorization: `Bearer ${apiKey}` },
     {
       model,
       max_completion_tokens: maxOutputTokens,
+      ...(options.temperature !== undefined
+        ? { temperature: options.temperature }
+        : {}),
       messages: [{ role: "system", content: systemPrompt }, ...history],
       ...(tools.length > 0
         ? {
