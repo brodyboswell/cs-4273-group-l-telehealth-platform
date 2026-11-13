@@ -1,12 +1,14 @@
 "use client";
 
 import { createContext, useContext, type ReactNode } from "react";
+import type { VirtualClient } from "@/lib/chat/clientProfile";
 
 type PracticeSession = {
   sessionId: string;
   name: string;
   userId: string;
   browserSession: boolean;
+  client: VirtualClient;
 };
 const PracticeSessionContext = createContext<PracticeSession | null>(null);
 

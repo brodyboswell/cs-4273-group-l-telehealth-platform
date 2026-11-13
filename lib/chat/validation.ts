@@ -1,4 +1,5 @@
 import type { Transcript } from "./types";
+import { parseVirtualClient } from "./clientProfile";
 import type {
   ActivityAction,
   ActivitySnapshot,
@@ -50,6 +51,9 @@ export function isTranscript(value: unknown): value is Transcript {
     (value.endedAt !== undefined && !isTimestamp(value.endedAt)) ||
     typeof value.personaId !== "string" ||
     typeof value.personaName !== "string" ||
+    (value.client !== undefined &&
+      (!parseVirtualClient(value.client) ||
+        (value.client as { name: unknown }).name !== value.personaName)) ||
     (value.ownerId !== undefined && (typeof value.ownerId !== "string" || !value.ownerId)) ||
     !isTimestamp(value.createdAt) ||
     !isTimestamp(value.updatedAt) ||

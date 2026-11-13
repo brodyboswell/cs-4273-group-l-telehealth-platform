@@ -9,6 +9,10 @@ import { SessionHeader } from "./SessionHeader";
 import { SessionToolbar } from "./SessionToolbar";
 import { loadBrowserSession } from "@/lib/chat/browserSession";
 import type { Transcript } from "@/lib/chat/types";
+import {
+  DEFAULT_CLIENT_DISPLAY,
+  type VirtualClient,
+} from "@/lib/chat/clientProfile";
 import { PracticeSessionProvider } from "./PracticeSession";
 import { RoomStateProvider } from "./RoomState";
 
@@ -23,6 +27,7 @@ type SessionShellProps = {
   sessionId: string;
   name: string;
   userId: string;
+  client?: VirtualClient;
   browserSession?: boolean;
 };
 
@@ -57,7 +62,8 @@ function BrowserSessionShell(props: SessionShellProps) {
   return (
     <ActiveSessionShell
       {...props}
-      name={transcript.name || "Practice with Jacob"}
+      name={transcript.name || `Practice with ${transcript.personaName}`}
+      client={transcript.client}
     />
   );
 }
@@ -67,6 +73,7 @@ function ActiveSessionShell({
   sessionId,
   name,
   userId,
+  client = DEFAULT_CLIENT_DISPLAY,
   browserSession = false,
 }: SessionShellProps) {
   const pathname = usePathname();
@@ -130,7 +137,7 @@ function ActiveSessionShell({
 
   return (
     <PracticeSessionProvider
-      session={{ sessionId, name, userId, browserSession }}
+      session={{ sessionId, name, userId, browserSession, client }}
     >
       <ActivityBridgeProvider>
         <RoomStateProvider>

@@ -12,6 +12,8 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { isValidSessionId, isTranscript } from "./validation";
 import { DEFAULT_PERSONA, type Persona } from "./persona";
+import { buildClientPersona } from "./clientPersona";
+import type { VirtualClient } from "./clientProfile";
 import type { ChatTurn, Speaker, Transcript, TranscriptEntry } from "./types";
 import { usesBrowserSessions } from "./storageMode";
 
@@ -23,6 +25,7 @@ export async function createPracticeSession(
   ownerId: string,
   name: string,
   requestId: string,
+  client?: VirtualClient,
 ): Promise<Transcript> {
   const sessionId = `s-${createHash("sha256")
     .update(ownerId)
@@ -30,13 +33,10 @@ export async function createPracticeSession(
     .update(requestId)
     .digest("hex")
     .slice(0, 40)}`;
+  const persona = client ? buildClientPersona(client) : DEFAULT_PERSONA;
+  const sessionName = name || `Practice with ${persona.name}`;
   if (usesBrowserSessions())
-    return buildTranscript(
-      sessionId,
-      DEFAULT_PERSONA,
-      ownerId,
-      name || `Practice with ${DEFAULT_PERSONA.name}`,
-    );
+    return buildTranscript(sessionId, persona, ownerId, sessionName, client);
   return withSessionLock(sessionId, async () => {
     const existing = await readTranscript(sessionId);
     if (existing) {
@@ -46,9 +46,10 @@ export async function createPracticeSession(
     }
     return getOrCreateTranscript(
       sessionId,
-      DEFAULT_PERSONA,
+      persona,
       ownerId,
-      name || `Practice with ${DEFAULT_PERSONA.name}`,
+      sessionName,
+      client,
     );
   });
 }
@@ -149,6 +150,7 @@ export async function getOrCreateTranscript(
   persona: Persona,
   ownerId?: string,
   name?: string,
+  client?: VirtualClient,
 ): Promise<Transcript> {
   const existing = await readTranscript(sessionId);
   if (existing) {
@@ -157,7 +159,7 @@ export async function getOrCreateTranscript(
       throw new TranscriptAccessError("Transcript not found.");
     return existing;
   }
-  const t = buildTranscript(sessionId, persona, ownerId, name);
+  const t = buildTranscript(sessionId, persona, ownerId, name, client);
   await writeTranscript(t);
   return t;
 }
@@ -167,6 +169,7 @@ function buildTranscript(
   persona: Persona,
   ownerId?: string,
   name?: string,
+  client?: VirtualClient,
 ): Transcript {
   const now = new Date().toISOString();
   const t: Transcript = {
@@ -175,6 +178,7 @@ function buildTranscript(
     ...(ownerId !== undefined ? { ownerId } : {}),
     personaId: persona.id,
     personaName: persona.name,
+    ...(client ? { client } : {}),
     createdAt: now,
     updatedAt: now,
     entries: [],
@@ -343,6 +347,12 @@ export function formatTranscriptText(t: Transcript): string {
     `Session ID: ${t.sessionId}`,
     ...(t.name ? [`Session name: ${t.name}`] : []),
     `Virtual client: ${t.personaName} (${t.personaId})`,
+    ...(t.client
+      ? [
+          `Client profile: ${t.client.gender}, age ${t.client.age}`,
+          `Client scenario: ${t.client.scenario}`,
+        ]
+      : []),
     `Started: ${t.createdAt}`,
     `Last updated: ${t.updatedAt}`,
     ...(t.endedAt ? [`Ended: ${t.endedAt}`] : []),
