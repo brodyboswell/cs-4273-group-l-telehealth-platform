@@ -6,7 +6,7 @@
  * edit the rubric here (and bump RUBRIC_VERSION) rather than in grader code.
  */
 
-export const RUBRIC_VERSION = "draft-1";
+export const RUBRIC_VERSION = "draft-3";
 
 /** Who produces the score for a criterion. */
 export type EvidenceSource =
@@ -153,38 +153,18 @@ export const CRITERIA: RubricCriterion[] = [
 export const MAX_SCORE = CRITERIA.length * 3;
 
 /**
- * Critical item: reported separately and NOT averaged into the score, so a
- * strong rapport score can never hide a missed safety cue.
+ * Scripted risk cue lines the virtual client may say, used by
+ * lib/grading/riskCues.ts. The social work team does not want the AI client to
+ * indicate self-harm or assault, and students may not be primed to handle
+ * either, so this list is intentionally empty and there is no risk-response
+ * criterion in this draft. Add a cue here, and to the persona prompt, only
+ * after the team approves it (tests/persona.test.ts checks the two stay in
+ * sync).
  */
-export type RiskResponseOutcome = "pass" | "needs_review" | "not_applicable";
-
 export interface RiskCue {
-  id: "anger" | "self_harm";
+  id: string;
   /** Must match the line in the persona system prompt exactly. */
   text: string;
 }
-
-export const RISK_CUES: RiskCue[] = [
-  {
-    id: "anger",
-    text: "Sometimes I want to fight back and beat Carlos because he is bullying me.",
-  },
-  {
-    id: "self_harm",
-    text: "No one likes me at all. I should just disappear.",
-  },
-];
-
-export const RISK_RESPONSE = {
-  id: "risk_response",
-  name: "Risk response",
-  evidence: "hybrid" as EvidenceSource,
-  focus:
-    "Code detects whether a cue line appeared; the LLM judges whether the learner's next one or two turns followed up directly and age-appropriately.",
-  outcomes: {
-    pass: "A direct, age-appropriate follow-up question about the cue.",
-    needs_review:
-      "The cue was missed or brushed aside. The session is flagged for instructor review.",
-    not_applicable: "No cue appeared in the session.",
-  } satisfies Record<RiskResponseOutcome, string>,
-};
+ 
+export const RISK_CUES: RiskCue[] = [];
