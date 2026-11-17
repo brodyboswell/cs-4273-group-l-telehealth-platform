@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
 	createWhiteboardSvgActionParser,
+	FACE_EXAMPLES,
 	whiteboardActivity,
 } from '../lib/activities/whiteboard';
 import {
@@ -17,6 +18,12 @@ const validAction = {
 };
 
 describe('whiteboard SVG action parser', () => {
+	it('accepts each documented face example through the actual sanitizer', () => {
+		for (const features of Object.values(FACE_EXAMPLES)) {
+			const svg = `<svg viewBox="0 0 500 350"><g fill="none" stroke="#293c35" stroke-width="4"><circle cx="250" cy="175" r="120"/><circle cx="210" cy="150" r="10"/><circle cx="290" cy="150" r="10"/>${features}</g></svg>`;
+			assert.doesNotThrow(() => parseInput({ svg, spokenText: 'I drew a face.' }));
+		}
+	});
 	it('accepts a valid action and trims spoken text when a sanitizer is supplied', () => {
 		const parseWithTestSanitizer = createWhiteboardSvgActionParser(
 			(svg) => `sanitized:${svg}`,

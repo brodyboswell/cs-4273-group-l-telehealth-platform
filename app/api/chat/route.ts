@@ -303,18 +303,17 @@ export async function POST(request: Request) {
           return { ok: false as const, status: 502, msg };
         }
 
-        const toolOnlyFallback =
+        const rejectedActionFallback =
           operation.kind === "message" &&
           reply.toolCalls.length > 0 &&
-          actions.length === 0 &&
-          !reply.text.trim()
+          actions.length === 0
             ? "I couldn't complete that activity action just now. Could you ask me to try again?"
             : "";
         const replyText =
           actionSpeech(actions) ||
+          rejectedActionFallback ||
           reply.text.trim() ||
-          actionClientText(actions) ||
-          toolOnlyFallback;
+          actionClientText(actions);
         if (!replyText)
           throw new LlmError("The virtual client returned an empty reply.");
 
