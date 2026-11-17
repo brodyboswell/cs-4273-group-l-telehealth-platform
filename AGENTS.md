@@ -14,7 +14,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`; the app redirects to `/practice`.
+Configure Supabase using `.env.example` and README.md. Open `http://localhost:3000`; the app redirects to `/login`.
 
 **Tests and checks:**
 ```bash
@@ -121,11 +121,67 @@ voice-agent/                 # Separate Python process: realtime voice AI (LiveK
 
 *Append-only. Add new entries at the top.*
 
+**2026-11-16 — Voice agent on Supabase auth, explicit sessions and custom clients**
+Context: Main added Supabase login (middleware returns 401 for `/api/*` without a user), explicit `/sessions/new` session IDs, learner-created clients and owner fields on transcripts. The Python voice agent has no user cookie and its transcript writer dropped unknown fields.
+Decision: Agent-only routes live under `/api/voice/` (`persona`, `activity`, `action`); middleware skips the user check for them and each route requires the shared `VOICE_AGENT_SECRET` header. The persona comes from the session transcript (`personaForTranscript`), `/api/livekit-token` checks the logged-in user owns the session, and the agent never creates a transcript. `transcript_store.py` keeps every field it does not know and stops writing once `endedAt` is set. Voice is hidden in browser storage mode.
+Rationale: Keeps per-learner authorization intact without giving the agent a Supabase account, and makes the voice client play the same character as text chat.
+Gotcha: Set the same `VOICE_AGENT_SECRET` in `.env.local` and `voice-agent/.env`. Never let a Python write drop `ownerId`, or the learner loses access to their session.
+
+---
+
+**2026-11-13 — Learner-created virtual clients drive the chat persona**
+Context: Learners can now define a client (name, gender, age 4–17, scenario, avatar) on the setup screen, and the virtual client must play that person consistently.
+Decision: The start request sends the confirmed client, and the server validates it with `parseVirtualClient`, which requires an avatar from the gender's set and rejects unknown fields. The client is stored on the transcript as `client`, with persona ID `custom-client-v1`. `lib/chat/clientPersona.ts` holds a reviewable template with placeholders. It defines fixed identity facts, gender pronouns (a "Prefer not to say" client keeps gender private), age-band speech style, and explicit confused-correction rules for a wrong name, age, gender or pronouns, or scenario. The scenario is fenced and treated as background facts, never instructions. The chat route selects each session's persona with `personaForTranscript`. Sessions without a client keep Jacob. The practice room shows the client's avatar and name, and clicking the avatar opens a profile dialog.
+Rationale: Keeps persona wording in one reviewable file, and keeps provider adapters persona-neutral.
+Gotcha: Custom clients include only the shared self-harm cue; Jacob's anger cue names Carlos and is omitted. Rubric cue matching for custom scenarios needs research-team review. In browser mode the client comes from the untrusted sessionStorage snapshot; it is revalidated each turn but could be edited by the learner.
+
+---
+
+**2026-11-12 — Ship setup with deferred session logs**
+Context: The user wants to push the intermission UI themselves and defer saved logs until later. Vercel cannot use the prototype's project-local JSON writes.
+Decision: Session logs is a Coming soon page; transcript download controls are hidden. Vercel automatically uses browser sessionStorage for the active conversation. Start returns a temporary snapshot, chat validates its owner/session/persona and returns an updated snapshot, and End clears the tab's snapshot and returns to setup. Local file mode remains for development. PRACTICE_STORAGE=browser selects hosted behavior locally; file mode requires writable persistent storage.
+Rationale: Keeps setup, chat, activity navigation, and account sign-out usable without introducing database infrastructure or unreliable serverless temporary files.
+Gotcha: Browser snapshots are untrusted conversation context, not authoritative logs for grading or research. Database persistence and server-authoritative history remain deferred. Closing the tab discards its conversation; another tab cannot resume its URL. The user explicitly forbids committing or pushing for them.
+
+---
+
+**2026-11-12 — Separate development and production output**
+Context: A local practice page failed in Next.js's chunk URL loader after development and production commands shared `.next` output.
+Decision: Use `.next-dev` for the development-server phase and `.next` for production. Ignore both generated trees in Git and ESLint, and include both generated type directories in TypeScript.
+Rationale: A production build must not replace the JavaScript chunks and manifests of a running development server.
+Gotcha: Reload browser tabs after restarting development to discard their previous chunk mappings. Do not run multiple development servers against the same output directory.
+
+---
+
+**2026-11-12 — Explicit practice-session lifecycle and account logs**
+Context: Automatically created chat IDs made session boundaries implicit, and End session signed the learner out.
+Decision: Sign-in and confirmation now open `/sessions/new`. An authenticated, retry-safe start POST creates a named transcript; practice URLs include the session ID in `/practice/[sessionId]`. The shared shell consumes that ID across activities. Transcript GET and chat POST require existing owned sessions. End session records completion and returns to logs without signing out. A shared Account menu provides setup, session logs with transcript viewing/downloads, and sign-out.
+Rationale: Makes each practice attempt explicit and independently reviewable before a future database migration, while preserving the room shell and activity tools.
+Gotcha: Storage remains JSON files with process-local locks. Multi-instance persistence and full local activity-state recovery remain future work. Legacy owned transcripts remain readable; ownerless logs remain inaccessible through authenticated APIs. `/practice` redirects to setup, and the former activity URLs require an explicit session ID.
+
+---
+
 **2026-11-12 — Share activity context with the voice agent through the existing ActivityBridge**
 Context: The mentor asked for the voice agent to understand the interactive activities, starting with Jacob reacting to the learner's feelings-chart selections, and suggested each student keep their own component behind a common interface.
 Decision: Reuse `useActivityTools`/`ActivityBridge` and the activity registry as that interface. During a call, `VoicePanel` polls `capture()` every 500 ms and sends the snapshot on the LiveKit topic `telehealth.activity` when it changes (and again when the agent joins). The agent posts it to `POST /api/voice/activity`, which validates and describes it with the registry, and with `record: true` appends an `activity` transcript entry under the session lock. The agent adds that context to Jacob's instructions; for activities in `REACTIVE_ACTIVITIES` (only `feelings`) a learner change also triggers a short spoken reaction. Structured interaction records were chosen over periodic screenshots for precision, latency, cost, and to avoid sending the learner's whole screen to a third party; screenshots remain an option for whiteboard drawings.
 Rationale: No activity-specific code in the voice path and no change to the bridge interface the activity components use; validation stays in one place.
 Gotcha: Polling was chosen over adding a change subscription to the bridge to avoid touching every activity. Jacob has no activity tools in voice mode yet, so his instructions tell him not to claim actions. The agent now re-reads the transcript before each append, but the Python and Next.js processes still share no lock. Speech-to-text switched from `multi` to `en` after misrecognitions.
+
+---
+
+**2026-11-09 — Add self-service account creation**
+Context: Dashboard-provisioned accounts can sign in, but learners need a way to register in the app.
+Decision: Add `/signup` and a Create account link to login, reuse the account form with password confirmation, and call Supabase signup with the current origin's `/auth/callback`. Exchange the returned PKCE code server-side and redirect only to `/practice`; show a recoverable login error for invalid links.
+Rationale: Email verification remains controlled by Supabase, and unconfirmed users receive no practice access. No user metadata grants elevated roles.
+Gotcha: Enable signups and allow each environment's callback URL in Supabase. Keep the default `ConfirmationURL` email template and open confirmation links in the signup browser. The default email service restricts recipients; configure SMTP for broader use. Password recovery and instructor roles remain future work.
+
+---
+
+**2026-11-09 — Replace mock login with Supabase Auth**
+Context: Practice routes and transcript APIs need authentication before adding database persistence.
+Decision: Use `@supabase/ssr` browser/server clients, email/password login, real logout, and Next.js 15 middleware for cookie refresh. Verify identity server-side and gate each API independently. Record transcript owner IDs and enforce ownership for reads, listing, and chat updates.
+Rationale: Establishes authentication and learner-level authorization while keeping reusable clients for future Supabase Postgres queries.
+Gotcha: Configure the project URL/publishable key and provision a confirmed user before signing in. No service-role key is needed. Legacy ownerless transcripts cannot be claimed through the API. File storage and process-local locking remain until a separate database migration. Signup, password recovery, and instructor roles are not implemented.
 
 ---
 

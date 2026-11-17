@@ -11,11 +11,12 @@ agent picks up new activities without Python changes.
 from __future__ import annotations
 
 import json
-import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
+
+from next_api import agent_headers, base_url
 
 
 class ActivityContextError(Exception):
@@ -40,19 +41,17 @@ def describe_activity(
     snapshot: dict[str, Any],
     *,
     record: bool,
-    base_url: str | None = None,
+    base_url_override: str | None = None,
     timeout: float = 10.0,
 ) -> ActivityContext:
     """Blocking call; run it with asyncio.to_thread from the agent."""
-    base = (base_url or os.environ.get("NEXTJS_BASE_URL") or "http://localhost:3000").rstrip(
-        "/"
-    )
+    base = base_url(base_url_override)
     url = f"{base}/api/voice/activity"
     payload = json.dumps({"sessionId": session_id, "activity": snapshot, "record": record})
     request = urllib.request.Request(
         url,
         data=payload.encode("utf8"),
-        headers={"content-type": "application/json"},
+        headers=agent_headers(json_body=True),
         method="POST",
     )
     try:
@@ -81,7 +80,7 @@ def submit_action(
     tool: str,
     tool_input: dict[str, Any],
     *,
-    base_url: str | None = None,
+    base_url_override: str | None = None,
     timeout: float = 15.0,
 ) -> dict[str, Any]:
     """Blocking call; run it with asyncio.to_thread from the agent.
@@ -90,9 +89,7 @@ def submit_action(
     shared activity registry and records it in the transcript. Returns
     {"action": ActivityAction, "text": str, "label": str}.
     """
-    base = (base_url or os.environ.get("NEXTJS_BASE_URL") or "http://localhost:3000").rstrip(
-        "/"
-    )
+    base = base_url(base_url_override)
     url = f"{base}/api/voice/action"
     payload = json.dumps(
         {"sessionId": session_id, "activity": snapshot, "tool": tool, "input": tool_input}
@@ -100,7 +97,7 @@ def submit_action(
     request = urllib.request.Request(
         url,
         data=payload.encode("utf8"),
-        headers={"content-type": "application/json"},
+        headers=agent_headers(json_body=True),
         method="POST",
     )
     try:

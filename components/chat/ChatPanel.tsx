@@ -11,16 +11,16 @@ import type {
   Transcript,
   TranscriptEntry,
 } from "@/lib/chat/types";
+import {
+  loadBrowserSession,
+  saveBrowserSession,
+} from "@/lib/chat/browserSession";
 import { waitForMinimumThinkTime } from "@/lib/chat/thinkDelay";
+import { usePracticeSession } from "@/components/session/PracticeSession";
 import {
   useActivityBridge,
   type ActivityTurnDispatchRequest,
 } from "@/components/session/ActivityBridge";
-import {
-  loadSessionId,
-  newSessionId,
-  saveSessionId,
-} from "@/lib/chat/clientSession";
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString([], {
@@ -29,11 +29,20 @@ function formatTime(iso: string) {
   });
 }
 
-export function ChatPanel({ compact = false }: { compact?: boolean }) {
+export function ChatPanel({
+  compact = false,
+  sessionId,
+  userId,
+  browserSession = false,
+}: {
+  compact?: boolean;
+  sessionId: string;
+  userId: string;
+  browserSession?: boolean;
+}) {
   const activityBridge = useActivityBridge();
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
-  const [clientName, setClientName] = useState("Alex");
+  const clientName = usePracticeSession().client.name;
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -48,6 +57,16 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
   const transcriptRequest = useRef<AbortController | null>(null);
   const activeSession = useRef<string | null>(null);
   const sendInFlight = useRef(false);
+  const transcriptRef = useRef<Transcript | null>(null);
+
+  const acceptTranscript = useCallback(
+    (transcript: Transcript) => {
+      if (browserSession) saveBrowserSession(transcript);
+      transcriptRef.current = transcript;
+      setEntries(transcript.entries);
+    },
+    [browserSession],
+  );
 
   const loadTranscript = useCallback(
     async (id: string): Promise<Transcript | null> => {
@@ -60,6 +79,15 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
       setError(null);
 
       try {
+        if (browserSession) {
+          const saved = loadBrowserSession(id, userId);
+          if (!saved || saved.endedAt)
+            throw new Error(
+              "This session is unavailable in this tab. Start a new practice session.",
+            );
+          acceptTranscript(saved);
+          return saved;
+        }
         const res = await fetch(`/api/transcripts/${encodeURIComponent(id)}`, {
           cache: "no-store",
           signal: controller.signal,
@@ -78,8 +106,7 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
           throw new Error("The session returned an invalid transcript.");
 
         if (controller.signal.aborted) return null;
-        setEntries(data.entries);
-        setClientName(data.personaName);
+        acceptTranscript(data);
         return data;
       } catch (err) {
         if (!controller.signal.aborted)
@@ -91,19 +118,17 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
         if (!controller.signal.aborted) setLoading(false);
       }
     },
-    [],
+    [browserSession, userId, acceptTranscript],
   );
 
   useEffect(() => {
-    const id = loadSessionId();
-    setSessionId(id);
-    void loadTranscript(id);
+    void loadTranscript(sessionId);
 
     return () => {
       activeSession.current = null;
       transcriptRequest.current?.abort();
     };
-  }, [loadTranscript]);
+  }, [loadTranscript, sessionId]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -140,6 +165,9 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           sessionId,
+          ...(browserSession
+            ? { transcript: transcriptRef.current ?? undefined }
+            : {}),
           message: text,
           ...(activity ? { activity } : {}),
         } satisfies ChatRequestBody),
@@ -150,6 +178,8 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
       if (activeSession.current !== sessionId) return;
 
       if (!res.ok) {
+        if (browserSession && isRecord(data) && isTranscript(data.transcript))
+          acceptTranscript(data.transcript);
         // The server keeps the learner message in the transcript even on failure.
         await loadTranscript(sessionId);
         if (activeSession.current === sessionId)
@@ -168,7 +198,7 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
       )
         throw new Error("Invalid chat response");
 
-      setEntries(data.transcript.entries);
+      acceptTranscript(data.transcript);
       const rejectedActivityAction = data.transcript.entries.some(
         (entry) =>
           entry.seq > lastSeq &&
@@ -176,12 +206,13 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
           entry.text.startsWith("Rejected activity tool call"),
       );
       if (rejectedActivityAction)
-        setError("The client couldn't complete the activity action. Ask them to try again.");
+        setError(
+          "The client couldn't complete the activity action. Ask them to try again.",
+        );
 
       const actions = data.transcript.entries
         .filter(
-          (entry) =>
-            entry.seq > lastSeq && entry.speaker === "virtual_client",
+          (entry) => entry.seq > lastSeq && entry.speaker === "virtual_client",
         )
         .flatMap((entry) => entry.actions ?? []);
       activityCapture.dispatch(actions);
@@ -203,7 +234,9 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
       if (transcript && !recorded) setDraft((current) => current || text);
 
       setError(
-        recorded
+        browserSession
+          ? "Could not get a reply. Please try again."
+          : recorded
           ? "Your message was recorded, but the reply could not be confirmed."
           : "Could not confirm whether your message was sent. Check the transcript before trying again.",
       );
@@ -237,13 +270,18 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
         }
         id = sessionIdRef.current;
         if (!id || loadingRef.current)
-          throw new Error("The session chat did not finish loading. Retry the chess move.");
+          throw new Error(
+            "The session chat did not finish loading. Retry the chess move.",
+          );
 
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             sessionId: id,
+            ...(browserSession
+              ? { transcript: transcriptRef.current ?? undefined }
+              : {}),
             activityTurn: {
               activity: request.snapshot,
               requestId: request.requestId,
@@ -263,7 +301,7 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
           data.reply.speaker === "virtual_client" &&
           data.reply.activityTurnId === request.requestId
         ) {
-          setEntries(data.transcript.entries);
+          acceptTranscript(data.transcript);
           const replySequence = (data.reply as Record<string, unknown>).seq;
           const savedReply = data.transcript.entries.find(
             (entry) =>
@@ -272,12 +310,16 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
               entry.activityTurnId === request.requestId,
           );
           if (!savedReply?.actions?.length)
-            throw new Error("The session returned an invalid chess turn reply.");
+            throw new Error(
+              "The session returned an invalid chess turn reply.",
+            );
           await waitForMinimumThinkTime(startedAt);
           request.dispatch(savedReply.actions ?? []);
           return;
         }
 
+        if (browserSession && isRecord(data) && isTranscript(data.transcript))
+          acceptTranscript(data.transcript);
         reconciledTranscript = await loadTranscript(id);
         const savedReply = reconciledTranscript?.entries.find(
           (entry) =>
@@ -319,7 +361,7 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
         setSending(false);
       }
     },
-    [loadTranscript],
+    [loadTranscript, browserSession, acceptTranscript],
   );
 
   useEffect(
@@ -327,49 +369,10 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
     [activityBridge, requestActivityTurn],
   );
 
-  function startNewSession() {
-    const id = newSessionId();
-    saveSessionId(id);
-    setSessionId(id);
-    setEntries([]);
-    void loadTranscript(id);
-  }
-
   const visible = entries.filter(
     (entry) =>
       entry.speaker !== "system" &&
       (entry.speaker === "learner" || entry.text.trim().length > 0),
-  );
-
-  const transcriptUrl = sessionId
-    ? `/api/transcripts/${encodeURIComponent(sessionId)}`
-    : "#";
-
-  const sessionActions = (
-    <>
-      <a
-        href={`${transcriptUrl}?format=txt&download=1`}
-        className="rounded-panel border border-charcoal/20 px-3 py-1.5 text-charcoal hover:bg-cream"
-      >
-        Transcript (.txt)
-      </a>
-
-      <a
-        href={`${transcriptUrl}?download=1`}
-        className="rounded-panel border border-charcoal/20 px-3 py-1.5 text-charcoal hover:bg-cream"
-      >
-        JSON
-      </a>
-
-      <button
-        type="button"
-        onClick={startNewSession}
-        disabled={sending}
-        className="rounded-panel px-3 py-1.5 text-charcoal/70 hover:bg-cream disabled:opacity-40"
-      >
-        New session
-      </button>
-    </>
   );
 
   return (
@@ -385,22 +388,9 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
             className="truncate text-xs text-charcoal/50"
             title={sessionId ?? undefined}
           >
-            Every message is recorded in the session transcript
+            Saved session logs are coming soon
           </p>
         </div>
-
-        {compact ? (
-          <details className="relative shrink-0 text-sm">
-            <summary className="cursor-pointer rounded-panel border border-charcoal/20 px-3 py-1.5 text-charcoal hover:bg-cream">
-              Options
-            </summary>
-            <div className="absolute right-0 z-20 mt-2 flex w-48 flex-col gap-1 rounded-panel border border-charcoal/15 bg-white p-2 shadow-md">
-              {sessionActions}
-            </div>
-          </details>
-        ) : (
-          <div className="flex items-center gap-2 text-sm">{sessionActions}</div>
-        )}
       </div>
 
       <div
@@ -429,8 +419,8 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
                     activityEvent
                       ? "max-w-full rounded-panel border border-sage/30 bg-sage/10 text-center text-charcoal"
                       : mine
-                      ? "rounded-br-sm bg-sage text-white"
-                      : "rounded-bl-sm border border-charcoal/10 bg-white text-charcoal"
+                        ? "rounded-br-sm bg-sage text-white"
+                        : "rounded-bl-sm border border-charcoal/10 bg-white text-charcoal"
                   } ${compact ? "max-w-[92%]" : "max-w-[80%]"}`}
                 >
                   {activityEvent && (
@@ -442,7 +432,8 @@ export function ChatPanel({ compact = false }: { compact?: boolean }) {
                 </div>
 
                 <span className="mt-1 px-1 text-[11px] text-charcoal/45">
-                  {activityEvent ? "Activity" : mine ? "You" : clientName} · {formatTime(e.timestamp)}
+                  {activityEvent ? "Activity" : mine ? "You" : clientName} ·{" "}
+                  {formatTime(e.timestamp)}
                 </span>
               </div>
             );

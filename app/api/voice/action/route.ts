@@ -3,6 +3,9 @@
  * LLM chose during a call (for example select_mood on the feelings chart or
  * replace_whiteboard_with_svg on the whiteboard).
  *
+ * Called only by the voice agent, with the shared VOICE_AGENT_SECRET header
+ * (lib/voice/agentAuth.ts), for a session that already exists and is open.
+ *
  * Body: { sessionId, activity: ActivitySnapshot, tool: string, input: unknown }
  *   - activity is the latest snapshot the agent received from the browser. It
  *     is untrusted and resolved here exactly like a text chat request's
@@ -20,14 +23,15 @@ import {
   type ResolvedActivity,
 } from "@/lib/activities/registry";
 import type { ActivityAction } from "@/lib/activities/types";
-import { DEFAULT_PERSONA } from "@/lib/chat/persona";
 import { jsonError } from "@/lib/chat/http";
+import { usesBrowserSessions } from "@/lib/chat/storageMode";
 import {
   appendEntry,
-  getOrCreateTranscript,
+  readTranscript,
   withSessionLock,
 } from "@/lib/chat/transcriptStore";
 import { isRecord, isValidSessionId } from "@/lib/chat/validation";
+import { isVoiceAgentRequest } from "@/lib/voice/agentAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,6 +39,10 @@ export const dynamic = "force-dynamic";
 const MAX_TOOL_NAME_LENGTH = 80;
 
 export async function POST(request: Request) {
+  if (!isVoiceAgentRequest(request))
+    return jsonError(401, "Voice agent credentials are missing or invalid.");
+  if (usesBrowserSessions())
+    return jsonError(503, "Voice sessions need file transcript storage.");
   let body: unknown;
   try {
     body = await request.json();
@@ -76,17 +84,24 @@ export async function POST(request: Request) {
   }
 
   const text = actionText(action);
+  let outcome: "saved" | "missing" | "ended";
   try {
-    await withSessionLock(sessionId, async () => {
-      const transcript = await getOrCreateTranscript(sessionId, DEFAULT_PERSONA);
+    outcome = await withSessionLock(sessionId, async () => {
+      const transcript = await readTranscript(sessionId);
+      if (!transcript) return "missing";
+      if (transcript.endedAt) return "ended";
       await appendEntry(transcript, "virtual_client", text, {
         model: "voice-agent",
         actions: [action],
       });
+      return "saved";
     });
   } catch {
     return jsonError(500, "Could not save the activity action.");
   }
+  if (outcome === "missing") return jsonError(404, "Practice session not found.");
+  if (outcome === "ended")
+    return jsonError(409, "This practice session has ended.");
 
   return Response.json(
     { action, text, label: resolved.label },

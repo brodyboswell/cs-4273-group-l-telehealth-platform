@@ -3,6 +3,10 @@
  * same activity registry as the text chat, instead of re-implementing every
  * activity's validation and description in Python.
  *
+ * Called only by the voice agent, with the shared VOICE_AGENT_SECRET header
+ * (lib/voice/agentAuth.ts); the session must already exist (created by
+ * /api/sessions when the learner started it).
+ *
  * Body: { sessionId, activity: ActivitySnapshot, record?: boolean }
  *   - activity is the browser's snapshot from the ActivityBridge, forwarded by
  *     the voice agent. It is untrusted and validated here exactly like a text
@@ -23,19 +27,24 @@ import {
   buildActivityContext,
   type ResolvedActivity,
 } from "@/lib/activities/registry";
-import { DEFAULT_PERSONA } from "@/lib/chat/persona";
 import { jsonError } from "@/lib/chat/http";
+import { usesBrowserSessions } from "@/lib/chat/storageMode";
 import {
   appendEntry,
-  getOrCreateTranscript,
+  readTranscript,
   withSessionLock,
 } from "@/lib/chat/transcriptStore";
 import { isRecord, isValidSessionId } from "@/lib/chat/validation";
+import { isVoiceAgentRequest } from "@/lib/voice/agentAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  if (!isVoiceAgentRequest(request))
+    return jsonError(401, "Voice agent credentials are missing or invalid.");
+  if (usesBrowserSessions())
+    return jsonError(503, "Voice sessions need file transcript storage.");
   let body: unknown;
   try {
     body = await request.json();
@@ -66,12 +75,12 @@ export async function POST(request: Request) {
   }
 
   if (record) {
+    let outcome: "saved" | "missing" | "ended";
     try {
-      await withSessionLock(sessionId, async () => {
-        const transcript = await getOrCreateTranscript(
-          sessionId,
-          DEFAULT_PERSONA,
-        );
+      outcome = await withSessionLock(sessionId, async () => {
+        const transcript = await readTranscript(sessionId);
+        if (!transcript) return "missing";
+        if (transcript.endedAt) return "ended";
         await appendEntry(
           transcript,
           "activity",
@@ -83,10 +92,15 @@ export async function POST(request: Request) {
             },
           },
         );
+        return "saved";
       });
     } catch {
       return jsonError(500, "Could not save the activity update.");
     }
+    if (outcome === "missing")
+      return jsonError(404, "Practice session not found.");
+    if (outcome === "ended")
+      return jsonError(409, "This practice session has ended.");
   }
 
   return Response.json(

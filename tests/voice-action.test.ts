@@ -5,25 +5,46 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { POST as postAction } from "../app/api/voice/action/route";
 import { POST as postActivity } from "../app/api/voice/activity/route";
-import { readTranscript } from "../lib/chat/transcriptStore";
+import { DEFAULT_PERSONA } from "../lib/chat/persona";
+import {
+  getOrCreateTranscript,
+  readTranscript,
+} from "../lib/chat/transcriptStore";
+import { VOICE_AGENT_SECRET_HEADER } from "../lib/voice/agentAuth";
 
+const SECRET = "test-voice-agent-secret-0123456789";
+const OWNER = "user-voice-action-tests";
 let directory: string;
-const previousDirectory = process.env.TRANSCRIPT_DIR;
+const previous = {
+  dir: process.env.TRANSCRIPT_DIR,
+  secret: process.env.VOICE_AGENT_SECRET,
+};
 
 before(async () => {
   directory = await mkdtemp(path.join(tmpdir(), "telehealth-voice-action-"));
   process.env.TRANSCRIPT_DIR = directory;
+  process.env.VOICE_AGENT_SECRET = SECRET;
+  for (const id of ["voice-action-1", "voice-action-4", "voice-tools-1"])
+    await getOrCreateTranscript(id, DEFAULT_PERSONA, OWNER, "Voice test");
 });
 after(async () => {
   await rm(directory, { recursive: true, force: true });
-  if (previousDirectory === undefined) delete process.env.TRANSCRIPT_DIR;
-  else process.env.TRANSCRIPT_DIR = previousDirectory;
+  restore("TRANSCRIPT_DIR", previous.dir);
+  restore("VOICE_AGENT_SECRET", previous.secret);
 });
 
-function action(body: unknown) {
+function restore(name: string, value: string | undefined) {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
+const agentHeaders = { [VOICE_AGENT_SECRET_HEADER]: SECRET };
+
+function action(body: unknown, headers: Record<string, string> = agentHeaders) {
   return postAction(
     new Request("http://localhost/api/voice/action", {
       method: "POST",
+      headers,
       body: JSON.stringify(body),
     }),
   );
@@ -36,6 +57,7 @@ describe("voice activity tools", () => {
     const res = await postActivity(
       new Request("http://localhost/api/voice/activity", {
         method: "POST",
+        headers: agentHeaders,
         body: JSON.stringify({ sessionId: "voice-tools-1", activity: feelings }),
       }),
     );
@@ -62,6 +84,7 @@ describe("voice activity tools", () => {
     assert.equal(data.action.input.moodId, "worried");
 
     const transcript = await readTranscript("voice-action-1");
+    assert.equal(transcript?.ownerId, OWNER);
     const last = transcript?.entries.at(-1);
     assert.equal(last?.speaker, "virtual_client");
     assert.equal(last?.text, "I have a lot on my mind.");
@@ -136,6 +159,19 @@ describe("voice activity tools", () => {
       input: { move: "e7e5" },
     });
     assert.equal(res.status, 400);
+  });
+
+  it("requires the agent secret and an existing session", async () => {
+    const body = {
+      sessionId: "voice-action-1",
+      activity: feelings,
+      tool: "select_mood",
+      input: { moodId: "sad", rationale: "Rough day." },
+    };
+    assert.equal((await action(body, {})).status, 401);
+    const missing = await action({ ...body, sessionId: "voice-action-none" });
+    assert.equal(missing.status, 404);
+    assert.equal(await readTranscript("voice-action-none"), null);
   });
 
   it("rejects malformed requests", async () => {

@@ -1,9 +1,14 @@
-import { SessionShell } from "@/components/session/SessionShell";
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth/server";
 
-export default function PracticeLayout({
+export const dynamic = "force-dynamic";
+
+export default async function PracticeLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <SessionShell>{children}</SessionShell>;
+  const user = await auth.getUser();
+  if (!user) redirect("/login");
+  return <>{children}</>;
 }

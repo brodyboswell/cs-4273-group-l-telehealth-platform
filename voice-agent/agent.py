@@ -58,7 +58,7 @@ from activity_client import (
     submit_action,
 )
 from persona_client import Persona, PersonaFetchError, fetch_persona
-from transcript_store import Transcript, append_entry, get_or_create_transcript, read_transcript
+from transcript_store import Transcript, append_entry, read_transcript
 
 logger = logging.getLogger("telehealth-voice-agent")
 
@@ -167,23 +167,32 @@ async def entrypoint(ctx: JobContext) -> None:
     # to a specific learner session while debugging.
     ctx.log_context_fields = {"room": ctx.room.name}
 
-    # The LiveKit room name doubles as the session id shared with the
-    # Next.js text chat and transcript store (see lib/chat/clientSession.ts
-    # and app/api/livekit-token/route.ts, which both key off this id).
+    # The LiveKit room name is the practice session id from the URL
+    # (/practice/<sessionId>); app/api/livekit-token/route.ts only issues a
+    # token for that room to the learner who owns the session.
     session_id = ctx.room.name
 
     try:
-        persona: Persona = fetch_persona()
+        # The persona is built from this session's transcript on the server,
+        # so a learner-created client is the same character as in Text mode.
+        persona: Persona = await asyncio.to_thread(fetch_persona, session_id)
     except PersonaFetchError as err:
         # Fails loudly and early rather than falling back to a hardcoded
-        # persona, so a misconfigured NEXTJS_BASE_URL is obvious in the logs
-        # instead of silently serving the wrong character.
+        # persona, so a misconfigured NEXTJS_BASE_URL or VOICE_AGENT_SECRET is
+        # obvious in the logs instead of silently serving the wrong character.
         logger.error("Could not load persona, aborting job: %s", err)
         raise
 
-    is_new_session = read_transcript(session_id) is None
-    transcript = get_or_create_transcript(
-        session_id, persona.id, persona.name, persona.opening_line
+    # The server creates the transcript when the learner starts the session;
+    # the agent only ever appends to it.
+    transcript = read_transcript(session_id)
+    if transcript is None or persona.ended or transcript.ended:
+        logger.error("Session %s is missing or has ended; not joining", session_id)
+        return
+    # Say the opening line out loud only if the learner hasn't spoken yet in
+    # Text or Voice mode, so the client doesn't repeat it mid-conversation.
+    is_new_session = not any(
+        entry.get("speaker") == "learner" for entry in transcript.entries
     )
     chat_ctx = _build_chat_ctx(transcript)
 
@@ -466,9 +475,9 @@ async def entrypoint(ctx: JobContext) -> None:
 
     await session.start(agent=agent, room=ctx.room)
 
-    # Only a brand-new session hears the scripted opening line out loud;
-    # resuming an existing one (learner switched from Text to Voice mid-chat)
-    # stays silent so Jacob doesn't repeat himself. add_to_chat_ctx=False
+    # Only a session where the learner hasn't spoken yet hears the scripted
+    # opening line out loud; resuming one (learner switched from Text to Voice
+    # mid-chat) stays silent so the client doesn't repeat themself. add_to_chat_ctx=False
     # because the line is already seeded into chat_ctx above via the
     # transcript's "scripted:opening-line" entry.
     if is_new_session:

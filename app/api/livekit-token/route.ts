@@ -7,18 +7,36 @@
  * find/append to the session's transcript file — one session ID ties the
  * text chat, the voice call, and the stored transcript together.
  *
+ * Only the logged-in learner who owns the session gets a token, and only while
+ * the session is open; voice needs file transcript storage, because the agent
+ * writes the same transcript file the text chat uses.
+ *
  * LIVEKIT_API_KEY / LIVEKIT_API_SECRET never reach the browser — only the
  * signed token does. Get these from https://cloud.livekit.io (Settings ->
  * API keys) and put them in .env.local, alongside LIVEKIT_URL.
  */
 import { AccessToken } from "livekit-server-sdk";
+import { auth } from "@/lib/auth/server";
 import { jsonError } from "@/lib/chat/http";
+import { usesBrowserSessions } from "@/lib/chat/storageMode";
+import {
+  getOwnedTranscript,
+  TranscriptAccessError,
+} from "@/lib/chat/transcriptStore";
 import { isRecord, isValidSessionId } from "@/lib/chat/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const user = await auth.getUser();
+  if (!user) return jsonError(401, "Please log in to continue.");
+  if (usesBrowserSessions())
+    return jsonError(
+      503,
+      "Voice sessions need file transcript storage (PRACTICE_STORAGE=file).",
+    );
+
   const apiKey = process.env.LIVEKIT_API_KEY;
   const apiSecret = process.env.LIVEKIT_API_SECRET;
   const url = process.env.LIVEKIT_URL;
@@ -42,6 +60,16 @@ export async function POST(request: Request) {
       400,
       "sessionId must be 8–64 letters, numbers, dashes or underscores.",
     );
+  }
+
+  try {
+    const transcript = await getOwnedTranscript(sessionId, user.id);
+    if (transcript.endedAt)
+      return jsonError(409, "This practice session has ended.");
+  } catch (err) {
+    if (err instanceof TranscriptAccessError)
+      return jsonError(404, "Practice session not found.");
+    throw err;
   }
 
   // One browser identity per tab per token request; the voice agent worker

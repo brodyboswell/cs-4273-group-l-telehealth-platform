@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Icon } from "@/components/ui/Icon";
-import { signOut } from "@/lib/auth/mockAuth";
+import { usePracticeSession } from "./PracticeSession";
+import { clearBrowserSession } from "@/lib/chat/browserSession";
+import { isRecord } from "@/lib/chat/validation";
 
 function ToolbarLink({
   href,
@@ -78,17 +80,44 @@ function ClientControlToggle() {
 
 export function SessionToolbar() {
   const router = useRouter();
+  const { sessionId, practicePath, browserSession } = usePracticeSession();
+
+  const [ending, setEnding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleEndSession() {
-    const { redirectTo } = await signOut();
-    router.replace(redirectTo);
+    if (ending) return;
+    setEnding(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/sessions/${sessionId}/end`, {
+        method: "POST",
+      });
+      const data: unknown = await response.json();
+      if (!response.ok)
+        throw new Error(
+          isRecord(data) && typeof data.error === "string"
+            ? data.error
+            : "Could not end your session. Please try again.",
+        );
+      if (browserSession) clearBrowserSession(sessionId);
+      router.replace("/sessions/new");
+      router.refresh();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Could not end your session. Please try again.",
+      );
+      setEnding(false);
+    }
   }
 
   return (
     <footer className="flex h-16 shrink-0 justify-between gap-4 items-center overflow-hidden border-t border-charcoal/15 bg-white px-4">
       <div className="flex min-w-0 items-center justify-start gap-0.5 overflow-hidden">
         <ToolbarLink
-          href="/practice/settings"
+          href={`${practicePath}/settings`}
           icon={<Icon name="settings" />}
           label="Settings"
         />
@@ -96,7 +125,7 @@ export function SessionToolbar() {
         <ClientControlToggle />
         <Divider />
         <Link
-          href="/practice"
+          href={practicePath}
           aria-label="Activities"
           title="Activities"
           className="flex shrink-0 items-center gap-2 px-2 py-1 text-sm text-charcoal hover:opacity-70"
@@ -108,21 +137,30 @@ export function SessionToolbar() {
         <ToolbarItem icon={<Icon name="camera" />} label="Snapshot" />
       </div>
 
+      {error && (
+        <p role="alert" className="text-sm text-terracotta">
+          {error}
+        </p>
+      )}
       <div className="flex min-w-0 items-center justify-end gap-2 overflow-hidden">
         <ToolbarLink
-          href="/practice/chat"
+          href={`${practicePath}/chat`}
           icon={<Icon name="chat" />}
           label="Chat"
         />
         <button
           type="button"
           onClick={handleEndSession}
+          disabled={ending}
+          aria-busy={ending}
           aria-label="End session"
           title="End session"
           className="flex shrink-0 items-center gap-2 rounded-panel bg-terracotta px-3 py-2 text-sm font-medium text-white hover:bg-terracotta/90"
         >
           <Icon name="phone" />
-          <span className="hidden sm:inline">End session</span>
+          <span className="hidden sm:inline">
+            {ending ? "Ending…" : "End session"}
+          </span>
         </button>
       </div>
     </footer>

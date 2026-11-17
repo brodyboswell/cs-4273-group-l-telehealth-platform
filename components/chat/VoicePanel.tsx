@@ -32,7 +32,6 @@ import {
   type RemoteTrack,
   type TextStreamReader,
 } from "livekit-client";
-import { loadSessionId } from "@/lib/chat/clientSession";
 import { useActivityBridge } from "@/components/session/ActivityBridge";
 import type { ActivityAction } from "@/lib/activities/types";
 import { isRecord } from "@/lib/chat/validation";
@@ -59,9 +58,12 @@ interface CaptionLine {
 }
 
 export function VoicePanel({
+  sessionId,
   personaName = "the virtual client",
   onEnded,
 }: {
+  /** The practice session from the URL; also the LiveKit room name. */
+  sessionId: string;
   personaName?: string;
   onEnded?: () => void;
 }) {
@@ -132,7 +134,6 @@ export function VoicePanel({
     setCaptions([]);
 
     try {
-      const sessionId = loadSessionId();
       const res = await fetch("/api/livekit-token", {
         method: "POST",
         headers: { "content-type": "application/json" },

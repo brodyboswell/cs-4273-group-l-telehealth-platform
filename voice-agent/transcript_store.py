@@ -6,6 +6,12 @@ turns into the exact same transcript files the Next.js text chat
 (app/api/chat) and ChatPanel read and write. Keep this in sync with that
 file if the Transcript/TranscriptEntry shape changes there.
 
+The Next.js server creates each transcript when the learner starts a practice
+session (/api/sessions), with fields this module does not use (ownerId, name,
+client, endedAt, ...). Those are kept exactly as they are on every write:
+dropping ownerId would lock the learner out of their own session. The agent
+never creates a transcript, and stops writing once the session has ended.
+
 Files live in TRANSCRIPT_DIR (same default as the TS side: ./data/transcripts
 resolved from the repo root, i.e. the parent of this voice-agent/ folder),
 one JSON file per session, named "<sessionId>.json".
@@ -50,6 +56,9 @@ def _file_for(session_id: str) -> Path:
     return transcript_dir() / f"{session_id}.json"
 
 
+_KNOWN_FIELDS = {"sessionId", "personaId", "personaName", "createdAt", "updatedAt", "entries"}
+
+
 @dataclass
 class Transcript:
     session_id: str
@@ -58,9 +67,17 @@ class Transcript:
     created_at: str
     updated_at: str
     entries: list[dict[str, Any]] = field(default_factory=list)
+    # Every other top-level field (ownerId, name, client, endedAt, ...),
+    # written back unchanged.
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def ended(self) -> bool:
+        return bool(self.extra.get("endedAt"))
 
     def to_json(self) -> dict[str, Any]:
         return {
+            **self.extra,
             "sessionId": self.session_id,
             "personaId": self.persona_id,
             "personaName": self.persona_name,
@@ -78,6 +95,7 @@ class Transcript:
             created_at=data["createdAt"],
             updated_at=data["updatedAt"],
             entries=list(data.get("entries", [])),
+            extra={k: v for k, v in data.items() if k not in _KNOWN_FIELDS},
         )
 
 
@@ -129,34 +147,6 @@ def _push_entry(
     return entry
 
 
-def get_or_create_transcript(
-    session_id: str, persona_id: str, persona_name: str, opening_line: str
-) -> Transcript:
-    """Loads the session's transcript, creating it (with the client's scripted
-    opening line) if this is a brand new session — matching getOrCreateTranscript
-    in the TS transcript store, so a session can start in voice mode too."""
-    existing = read_transcript(session_id)
-    if existing is not None:
-        return existing
-    now = _iso_now()
-    t = Transcript(
-        session_id=session_id,
-        persona_id=persona_id,
-        persona_name=persona_name,
-        created_at=now,
-        updated_at=now,
-        entries=[],
-    )
-    _push_entry(
-        t,
-        "system",
-        f"Session started with virtual client {persona_name} ({persona_id}).",
-    )
-    _push_entry(t, "virtual_client", opening_line, model="scripted:opening-line")
-    _write_transcript(t)
-    return t
-
-
 def append_entry(
     t: Transcript,
     speaker: Speaker,
@@ -164,7 +154,7 @@ def append_entry(
     *,
     model: str | None = None,
     latency_ms: float | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     # The Next.js server also appends to this file during a voice call (for
     # example the learner's activity updates via /api/voice/activity), so
     # reload the latest entries first instead of overwriting them with this
@@ -174,6 +164,10 @@ def append_entry(
     if latest is not None:
         t.entries = latest.entries
         t.updated_at = latest.updated_at
+        t.extra = latest.extra
+    if t.ended:
+        # The learner ended the session from the app; record nothing more.
+        return None
     entry = _push_entry(t, speaker, text, model=model, latency_ms=latency_ms)
     _write_transcript(t)
     return entry

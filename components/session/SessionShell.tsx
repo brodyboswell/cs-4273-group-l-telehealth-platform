@@ -8,6 +8,13 @@ import { ActivityBridgeProvider } from "./ActivityBridge";
 import { FaceCams } from "./FaceCams";
 import { SessionHeader } from "./SessionHeader";
 import { SessionToolbar } from "./SessionToolbar";
+import { loadBrowserSession } from "@/lib/chat/browserSession";
+import type { Transcript } from "@/lib/chat/types";
+import {
+  DEFAULT_CLIENT_DISPLAY,
+  type VirtualClient,
+} from "@/lib/chat/clientProfile";
+import { PracticeSessionProvider } from "./PracticeSession";
 import { RoomStateProvider } from "./RoomState";
 
 const ACTIVITY_ROUTES = new Set([
@@ -16,33 +23,75 @@ const ACTIVITY_ROUTES = new Set([
   "/practice/chess",
 ]);
 
-export function SessionShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+type SessionShellProps = {
+  children: React.ReactNode;
+  sessionId: string;
+  name: string;
+  userId: string;
+  client?: VirtualClient;
+  browserSession?: boolean;
+};
+
+export function SessionShell(props: SessionShellProps) {
+  return props.browserSession ? (
+    <BrowserSessionShell {...props} />
+  ) : (
+    <ActiveSessionShell {...props} />
+  );
+}
+
+function BrowserSessionShell(props: SessionShellProps) {
   const router = useRouter();
-  const activityPage = ACTIVITY_ROUTES.has(pathname);
-  const chatPage = pathname === "/practice/chat";
-  const sideChatPage = pathname === "/practice" || activityPage;
+  const [transcript, setTranscript] = useState<Transcript | null>(null);
+  useEffect(() => {
+    const saved = loadBrowserSession(props.sessionId, props.userId);
+    if (!saved || saved.endedAt) {
+      router.replace("/sessions/new");
+      return;
+    }
+    setTranscript(saved);
+  }, [props.sessionId, props.userId, router]);
+  if (!transcript)
+    return (
+      <main
+        className="flex min-h-dvh items-center justify-center bg-cream text-sm text-charcoal/70"
+        role="status"
+      >
+        Opening practice session…
+      </main>
+    );
+  return (
+    <ActiveSessionShell
+      {...props}
+      name={transcript.name || `Practice with ${transcript.personaName}`}
+      client={transcript.client}
+    />
+  );
+}
+
+function ActiveSessionShell({
+  children,
+  sessionId,
+  name,
+  userId,
+  client = DEFAULT_CLIENT_DISPLAY,
+  browserSession = false,
+}: SessionShellProps) {
+  const pathname = usePathname();
+  const activityPath = pathname.replace(`/practice/${sessionId}`, "/practice");
+  const router = useRouter();
+  const activityPage = ACTIVITY_ROUTES.has(activityPath);
+  const chatPage = activityPath === "/practice/chat";
+  const sideChatPage = activityPath === "/practice" || activityPage;
   const [expandedChatPath, setExpandedChatPath] = useState<string | null>(null);
   const mobileChatExpanded = sideChatPage && expandedChatPath === pathname;
   const chatTabRef = useRef<HTMLButtonElement>(null);
   const closeChatRef = useRef<HTMLButtonElement>(null);
   const [voiceMode, setVoiceMode] = useState(false);
-  const [personaName, setPersonaName] = useState("the virtual client");
 
   useEffect(() => {
     setExpandedChatPath(null);
   }, [pathname]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch("/api/persona", { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { name?: string } | null) => {
-        if (data?.name) setPersonaName(data.name);
-      })
-      .catch(() => {});
-    return () => controller.abort();
-  }, []);
 
   function closeMobileChat() {
     setExpandedChatPath(null);
@@ -59,7 +108,8 @@ export function SessionShell({ children }: { children: React.ReactNode }) {
       "/practice/chat",
       "/practice/settings",
     ];
-    for (const route of routes) {
+    for (const path of routes) {
+      const route = path.replace("/practice", `/practice/${sessionId}`);
       router.prefetch(route);
       // Automatic prefetch is disabled in Next development mode. Warm local
       // compilation too, instead of making the first click pay its cost.
@@ -75,7 +125,7 @@ export function SessionShell({ children }: { children: React.ReactNode }) {
     void import("@/components/activities/ChessBoard").catch(() => {});
     void import("@/components/activities/FeelingsCheckIn").catch(() => {});
     return () => controller.abort();
-  }, [router]);
+  }, [router, sessionId]);
 
   const activityPaneClassName = chatPage
     ? "hidden"
@@ -88,92 +138,108 @@ export function SessionShell({ children }: { children: React.ReactNode }) {
   const chatTabClassName = sideChatPage ? "session-chat-tab" : "hidden";
 
   return (
-    <ActivityBridgeProvider>
-      <RoomStateProvider>
-        <div className="relative flex h-dvh flex-col overflow-hidden bg-cream">
-          <SessionHeader />
-          <div className="session-room-body relative flex min-h-0 flex-1">
-            <FaceCams darkRail={activityPage} />
-            <main className={activityPaneClassName}>{children}</main>
-            <aside
-              className={chatSidebarClassName}
-              aria-label="Session chat"
-              onKeyDown={(event) => {
-                if (mobileChatExpanded && event.key === "Escape") {
-                  closeMobileChat();
-                }
-              }}
-            >
-              <button
-                ref={chatTabRef}
-                type="button"
-                className={chatTabClassName}
-                aria-label="Open session chat"
-                aria-controls="session-chat-content"
-                aria-expanded={mobileChatExpanded}
-                onClick={() => {
-                  setExpandedChatPath(pathname);
-                  requestAnimationFrame(() => closeChatRef.current?.focus());
+    <PracticeSessionProvider
+      session={{ sessionId, name, userId, browserSession, client }}
+    >
+      <ActivityBridgeProvider>
+        <RoomStateProvider>
+          <div className="relative flex h-dvh flex-col overflow-hidden bg-cream">
+            <SessionHeader />
+            <div className="session-room-body relative flex min-h-0 flex-1">
+              <FaceCams darkRail={activityPage} />
+              <main className={activityPaneClassName}>{children}</main>
+              <aside
+                className={chatSidebarClassName}
+                aria-label="Session chat"
+                onKeyDown={(event) => {
+                  if (mobileChatExpanded && event.key === "Escape") {
+                    closeMobileChat();
+                  }
                 }}
               >
-                Chat
-              </button>
-              <div id="session-chat-content" className="session-chat-content">
-                <div className="session-chat-mobile-header">
-                  <span>Session chat</span>
-                  <button
-                    ref={closeChatRef}
-                    type="button"
-                    onClick={closeMobileChat}
-                    aria-label="Close session chat"
-                  >
-                    Close
-                  </button>
+                <button
+                  ref={chatTabRef}
+                  type="button"
+                  className={chatTabClassName}
+                  aria-label="Open session chat"
+                  aria-controls="session-chat-content"
+                  aria-expanded={mobileChatExpanded}
+                  onClick={() => {
+                    setExpandedChatPath(pathname);
+                    requestAnimationFrame(() => closeChatRef.current?.focus());
+                  }}
+                >
+                  Chat
+                </button>
+                <div id="session-chat-content" className="session-chat-content">
+                  <div className="session-chat-mobile-header">
+                    <span>Session chat</span>
+                    <button
+                      ref={closeChatRef}
+                      type="button"
+                      onClick={closeMobileChat}
+                      aria-label="Close session chat"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  {/* Voice needs the server-side transcript files the agent writes
+                      to, so it is offered only in file storage mode. */}
+                  {!browserSession && (
+                    <div className="flex shrink-0 gap-1 border-b border-charcoal/10 bg-white px-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setVoiceMode(false)}
+                        aria-pressed={!voiceMode}
+                        className={`rounded-t-panel px-3 py-1.5 text-xs font-semibold ${
+                          voiceMode
+                            ? "text-charcoal/50 hover:text-charcoal"
+                            : "border-b-2 border-charcoal text-charcoal"
+                        }`}
+                      >
+                        Text
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVoiceMode(true)}
+                        aria-pressed={voiceMode}
+                        className={`rounded-t-panel px-3 py-1.5 text-xs font-semibold ${
+                          voiceMode
+                            ? "border-b-2 border-charcoal text-charcoal"
+                            : "text-charcoal/50 hover:text-charcoal"
+                        }`}
+                      >
+                        Voice
+                      </button>
+                    </div>
+                  )}
+                  {/* Both panels mount together and voice mode is hidden rather than
+                      unmounted, so an in-progress call survives a tab switch; stopping
+                      it is an explicit "End voice session" action in VoicePanel. */}
+                  <div className={voiceMode ? "hidden" : "contents"}>
+                    <ChatPanel
+                      sessionId={sessionId}
+                      userId={userId}
+                      browserSession={browserSession}
+                      compact={sideChatPage}
+                    />
+                  </div>
+                  {!browserSession && (
+                    <div className={voiceMode ? "contents" : "hidden"}>
+                      <VoicePanel
+                        sessionId={sessionId}
+                        personaName={client.name}
+                        onEnded={() => setVoiceMode(false)}
+                      />
+                    </div>
+                  )}
                 </div>
-                <div className="flex shrink-0 gap-1 border-b border-charcoal/10 bg-white px-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setVoiceMode(false)}
-                    aria-pressed={!voiceMode}
-                    className={`rounded-t-panel px-3 py-1.5 text-xs font-semibold ${
-                      voiceMode
-                        ? "text-charcoal/50 hover:text-charcoal"
-                        : "border-b-2 border-charcoal text-charcoal"
-                    }`}
-                  >
-                    Text
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVoiceMode(true)}
-                    aria-pressed={voiceMode}
-                    className={`rounded-t-panel px-3 py-1.5 text-xs font-semibold ${
-                      voiceMode
-                        ? "border-b-2 border-charcoal text-charcoal"
-                        : "text-charcoal/50 hover:text-charcoal"
-                    }`}
-                  >
-                    Voice
-                  </button>
-                </div>
-                {/* Both panels mount together and voice mode is hidden rather than
-                    unmounted, so an in-progress call survives a tab switch; stopping
-                    it is an explicit "End voice session" action in VoicePanel. */}
-                <div className={voiceMode ? "hidden" : "contents"}>
-                  <ChatPanel compact={sideChatPage} />
-                </div>
-                <div className={voiceMode ? "contents" : "hidden"}>
-                  <VoicePanel
-                    personaName={personaName}
-                    onEnded={() => setVoiceMode(false)}
-                  />
-                </div>
-              </div>
-            </aside>
+              </aside>
+            </div>
+            <SessionToolbar />
           </div>
-          <SessionToolbar />
-        </div>
-      </RoomStateProvider>
-    </ActivityBridgeProvider>
+        </RoomStateProvider>
+      </ActivityBridgeProvider>
+    </PracticeSessionProvider>
   );
 }

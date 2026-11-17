@@ -1,4 +1,5 @@
 import type { Transcript } from "./types";
+import { parseVirtualClient } from "./clientProfile";
 import type {
   ActivityAction,
   ActivitySnapshot,
@@ -7,6 +8,7 @@ import type {
 
 /** Shared browser/server input rules; keep this module free of server imports. */
 export const MAX_MESSAGE_LENGTH = 2000;
+export const MAX_SESSION_NAME_LENGTH = 100;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 
 export function isValidSessionId(id: unknown): id is string {
@@ -45,8 +47,14 @@ export function isTranscript(value: unknown): value is Transcript {
   if (
     !isRecord(value) ||
     !isValidSessionId(value.sessionId) ||
+    (value.name !== undefined && (typeof value.name !== "string" || value.name.length > MAX_SESSION_NAME_LENGTH)) ||
+    (value.endedAt !== undefined && !isTimestamp(value.endedAt)) ||
     typeof value.personaId !== "string" ||
     typeof value.personaName !== "string" ||
+    (value.client !== undefined &&
+      (!parseVirtualClient(value.client) ||
+        (value.client as { name: unknown }).name !== value.personaName)) ||
+    (value.ownerId !== undefined && (typeof value.ownerId !== "string" || !value.ownerId)) ||
     !isTimestamp(value.createdAt) ||
     !isTimestamp(value.updatedAt) ||
     !Array.isArray(value.entries)

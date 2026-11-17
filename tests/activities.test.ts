@@ -8,6 +8,7 @@ import {
 } from '../lib/activities/registry';
 import { feelingsActivity } from '../lib/activities/feelings';
 import type { ActivityAction } from '../lib/activities/types';
+import { isRecord } from '../lib/chat/validation';
 
 describe('activity registry', () => {
 	it('resolves known activity state and exposes its context and tools', () => {
@@ -135,20 +136,17 @@ describe('activity registry', () => {
 		);
 	});
 
-	it('rejects whiteboard SVG actions until the sanitizer placeholder is replaced', () => {
+	it('accepts sanitized whiteboard SVG actions and rejects unsupported fields', () => {
 		const input = {
 			svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 350"><circle cx="20" cy="20" r="10" /></svg>',
 			spokenText: 'I drew how that felt.',
 		};
-		assert.throws(
-			() =>
-				activityRegistry.validateAction(
-					'whiteboard',
-					'replace_whiteboard_with_svg',
-					input,
-				),
-			/sanitization is not implemented/,
+		const action = activityRegistry.validateAction(
+			'whiteboard', 'replace_whiteboard_with_svg', input,
 		);
+		assert.equal(action.tool, 'replace_whiteboard_with_svg');
+		assert.ok(isRecord(action.input));
+		assert.match(String(action.input.svg), /<circle/);
 		assert.throws(
 			() =>
 				activityRegistry.validateAction(
