@@ -112,7 +112,8 @@ panel and get written to the transcript, identically to a Text-mode conversation
 | `voice-agent/transcript_store.py` | Python mirror of `lib/chat/transcriptStore.ts` — same JSON file format, same `data/transcripts/` folder |
 | `voice-agent/persona_client.py` | Fetches the persona from `/api/persona` instead of hardcoding it a second time |
 | `app/api/voice/activity/route.ts` | Validates and describes an activity snapshot with the shared activity registry for the voice agent; with `record: true` it also logs the learner's update to the transcript |
-| `voice-agent/activity_client.py` | Calls `/api/voice/activity` from the agent |
+| `app/api/voice/action/route.ts` | Validates an activity tool call the LLM made during a call (`select_mood`, `replace_whiteboard_with_svg`) with the shared registry and records it in the transcript with its `actions` |
+| `voice-agent/activity_client.py` | Calls `/api/voice/activity` (context + tool list) and `/api/voice/action` from the agent |
 
 ## How continuity between Text and Voice works
 
@@ -137,16 +138,22 @@ VoicePanel --capture() every 500 ms, send on change--> LiveKit room, topic "tele
 voice-agent/agent.py --POST /api/voice/activity--> activity registry (validate + describe)
                      <-- prompt context ---------
                      -> Jacob's instructions are updated; on a feelings-chart change he reacts out loud
+                     <-- tool list (name, description, inputSchema) -> offered to the LLM as tools
+Jacob calls a tool --POST /api/voice/action--> registry validates + records the action
+voice-agent/agent.py --LiveKit topic "telehealth.action"--> VoicePanel --capture().dispatch()--> activity
 ```
 
 - Opening an activity only updates Jacob's context. Changing the state of an activity in
   `REACTIVE_ACTIVITIES` (currently just `feelings`) also records an `activity` entry in the transcript
   and has Jacob respond in character.
-- Chess and the whiteboard update Jacob's context but do not trigger a spoken reaction; chess turns still
-  run through the text chat's turn flow (shown in the Text tab).
-- Jacob has no activity tools in voice mode yet, so he can talk about the activity but not select a
-  feeling or draw. That is the next step (send validated tool actions back to the browser and dispatch
-  them through the ActivityBridge).
+- Jacob can use the tools of the activities in `VOICE_TOOL_ACTIVITIES` (`feelings`, `whiteboard`).
+  The tools come from the registry, so a new activity only needs to be added to that set. The change
+  his own tool call causes on screen is not treated as a learner change (`pending_self_change`), so he
+  does not react to himself or log it as an `activity` entry.
+- The whiteboard is not reactive; Jacob draws only when the learner asks, and drawing replaces the board.
+- Chess is deliberately not a voice tool: after each learner move the hidden ChatPanel still requests
+  Jacob's move through `/api/chat` (shown in the Text tab), and the voice agent reads that stored reply
+  out loud (`announce_chess_move`), so the move is never made twice.
 - The browser snapshot is untrusted: `/api/voice/activity` validates it exactly like `/api/chat` does.
 
 ## Checking speech recognition errors

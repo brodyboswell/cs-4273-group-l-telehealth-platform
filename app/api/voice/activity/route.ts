@@ -11,8 +11,11 @@
  *     "activity" entry is appended to the session transcript (under the same
  *     per-session lock app/api/chat uses) before Jacob reacts by voice.
  *
- * Returns { activityId, label, context } where context is the same prompt text
- * app/api/chat adds for the text chat (buildActivityContext).
+ * Returns { activityId, label, context, tools } where context is the same
+ * prompt text app/api/chat adds for the text chat (buildActivityContext) and
+ * tools lists the activity tools available in this state (name, description,
+ * inputSchema), so the voice agent can offer them to the LLM without a Python
+ * copy of each schema. Tool calls come back through POST /api/voice/action.
  */
 import { activityRegistry } from "@/lib/activities/catalog";
 import {
@@ -91,6 +94,11 @@ export async function POST(request: Request) {
       activityId: resolved.activityId,
       label: resolved.label,
       context: buildActivityContext(resolved),
+      tools: resolved.tools.map(({ name, description, inputSchema }) => ({
+        name,
+        description,
+        inputSchema,
+      })),
     },
     { headers: { "cache-control": "no-store" } },
   );

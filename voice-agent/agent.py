@@ -13,7 +13,11 @@ Text and Voice tabs mid-session without losing the conversation.
 It also listens for the on-screen activity the browser shares over the room
 (topic "telehealth.activity", sent by VoicePanel from the ActivityBridge), so
 Jacob knows what the learner is looking at and reacts out loud when the
-learner makes a selection on the feelings chart.
+learner makes a selection on the feelings chart. Jacob can act on the feelings
+chart and the whiteboard by voice: the tools come from the shared activity
+registry (POST /api/voice/activity), a tool call is validated and recorded by
+POST /api/voice/action, and the validated action is sent back to the browser on
+topic "telehealth.action", where VoicePanel applies it to the activity.
 
 Run alongside the Next.js app (two processes, one terminal each):
     Terminal 1:  npm run dev
@@ -47,7 +51,12 @@ from livekit.agents import (
 )
 from livekit.plugins import anthropic
 
-from activity_client import ActivityContextError, describe_activity
+from activity_client import (
+    ActivityActionError,
+    ActivityContextError,
+    describe_activity,
+    submit_action,
+)
 from persona_client import Persona, PersonaFetchError, fetch_persona
 from transcript_store import Transcript, append_entry, get_or_create_transcript, read_transcript
 
@@ -62,18 +71,52 @@ ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5")
 # Must match ACTIVITY_TOPIC in components/chat/VoicePanel.tsx.
 ACTIVITY_TOPIC = "telehealth.activity"
 
+# Must match ACTION_TOPIC in components/chat/VoicePanel.tsx.
+ACTION_TOPIC = "telehealth.action"
+
 # Activities where a learner change should make Jacob respond out loud right
 # away. Other activities (chess, whiteboard) still update his context
-# silently; chess turns keep going through the text chat's turn flow.
+# silently.
 REACTIVE_ACTIVITIES = {"feelings"}
 
-# The activity descriptions are shared with the text chat, where Jacob can use
-# activity tools. The voice agent has no activity tools yet, so keep him from
-# promising actions (picking a feeling, drawing) that won't happen on screen.
-VOICE_ACTIVITY_LIMITS = (
+# Activities whose registry tools Jacob may call during a voice call. Chess is
+# left out on purpose: its moves are still made by the text chat's turn flow
+# (the hidden ChatPanel requests a turn after each learner move), so a second
+# voice tool would make him move twice. The voice agent reads that move out
+# loud instead (see announce_chess_move).
+VOICE_TOOL_ACTIVITIES = {"feelings", "whiteboard"}
+
+# What the browser applies for each tool, so the agent can tell the learner's
+# own clicks from the change Jacob's action causes. Maps a tool name to the
+# activity state it should produce.
+EXPECTED_STATE_AFTER_TOOL = {
+    "select_mood": lambda tool_input: {"selectedMoodId": tool_input.get("moodId")},
+}
+ACTION_ECHO_SECONDS = 20.0
+
+VOICE_ACTIVITY_LIMITS: dict[str, str] = {
+    "feelings": (
+        "This is a voice call. You can only change the feelings chart by calling the "
+        "select_mood tool, and only when the learner asks you to show how you feel or "
+        "clearly agrees. Never say you picked a feeling unless the tool succeeded. "
+        "After it succeeds, say one short sentence about why, in character."
+    ),
+    "whiteboard": (
+        "This is a voice call. You can only draw by calling the "
+        "replace_whiteboard_with_svg tool, and only after the learner directly asks "
+        "or clearly agrees. Say one short sentence about what you will draw before "
+        "you call it, and never claim to have drawn something unless the tool "
+        "succeeded. Drawing replaces the whole board."
+    ),
+    "chess": (
+        "This is a voice call. You cannot move pieces yourself: after the learner "
+        "moves, your reply move appears on the board automatically and is read out "
+        "to the learner. Do not announce or promise a move before it appears."
+    ),
+}
+DEFAULT_VOICE_ACTIVITY_LIMIT = (
     "This is a voice call: you can see and talk about the activity, but you cannot "
-    "select, move or draw anything on it yourself right now. Do not say that you "
-    "are doing so."
+    "select, move or draw anything on it yourself. Do not say that you are doing so."
 )
 
 server = AgentServer()
@@ -166,6 +209,140 @@ async def entrypoint(ctx: JobContext) -> None:
     last_snapshot: dict[str, Any] | None = None
     background_tasks: set[asyncio.Task[None]] = set()
 
+    # The change Jacob's own tool call is about to cause on screen. The
+    # snapshot that reports it must not be treated as a learner change (no
+    # transcript "activity" entry, no spoken reaction to himself).
+    pending_self_change: dict[str, Any] | None = None
+
+    # Chess replies already read out loud, and the transcript length when the
+    # call started (older lines belong to earlier Text or Voice sessions).
+    spoken_chess_seqs: set[int] = set()
+    baseline_seq = len(transcript.entries)
+
+    def is_echo_of_own_action(snapshot: dict[str, Any]) -> bool:
+        nonlocal pending_self_change
+        pending, pending_self_change = pending_self_change, None
+        if pending is None or time.monotonic() > pending["until"]:
+            return False
+        if pending["activityId"] != snapshot.get("activityId"):
+            return False
+        state = snapshot.get("state")
+        return isinstance(state, dict) and all(
+            state.get(key) == value for key, value in pending["state"].items()
+        )
+
+    def build_voice_tools(specs: list[dict[str, Any]]) -> list[llm.Tool]:
+        """Turns the registry's tool definitions into LiveKit raw-schema tools.
+        Each call is validated and recorded by /api/voice/action, then forwarded
+        to the browser, which applies it through the ActivityBridge."""
+        tools: list[llm.Tool] = []
+        for spec in specs:
+            name = spec["name"]
+
+            async def handler(
+                raw_arguments: dict[str, Any],
+                _name: str = name,
+            ) -> str:
+                nonlocal pending_self_change
+                snapshot = last_snapshot
+                if snapshot is None:
+                    raise llm.ToolError("There is nothing on screen to act on right now.")
+                try:
+                    result = await asyncio.to_thread(
+                        submit_action, session_id, snapshot, _name, raw_arguments
+                    )
+                except ActivityActionError as err:
+                    logger.warning("Activity tool %s rejected: %s", _name, err)
+                    raise llm.ToolError(f"The action was not applied: {err}") from err
+
+                action = result["action"]
+                expected = EXPECTED_STATE_AFTER_TOOL.get(_name)
+                if expected is not None:
+                    pending_self_change = {
+                        "activityId": action["activityId"],
+                        "state": expected(action["input"]),
+                        "until": time.monotonic() + ACTION_ECHO_SECONDS,
+                    }
+                await ctx.room.local_participant.send_text(
+                    json.dumps({"action": action}), topic=ACTION_TOPIC
+                )
+                logger.info("Activity action sent: %s.%s", action["activityId"], _name)
+                return f"Done: the {result.get('label', 'activity')} was updated on screen."
+
+            tools.append(
+                llm.function_tool(
+                    handler,
+                    raw_schema={
+                        "name": name,
+                        "description": spec["description"],
+                        "parameters": spec["inputSchema"],
+                    },
+                )
+            )
+        return tools
+
+    def chess_progress(snapshot: dict[str, Any] | None) -> tuple[str, int, str] | None:
+        """(gameId, number of moves, learnerColor) from a chess snapshot."""
+        if not snapshot or snapshot.get("activityId") != "chess":
+            return None
+        state = snapshot.get("state")
+        if not isinstance(state, dict):
+            return None
+        history = state.get("moveHistory")
+        game_id = state.get("gameId")
+        learner = state.get("learnerColor")
+        if not isinstance(history, list) or not isinstance(game_id, str) or learner not in ("w", "b"):
+            return None
+        return game_id, len(history), learner
+
+    def jacob_just_moved(previous: dict[str, Any] | None, snapshot: dict[str, Any]) -> bool:
+        current = chess_progress(snapshot)
+        if current is None:
+            return False
+        game_id, count, learner = current
+        before = chess_progress(previous)
+        before_count = before[1] if before and before[0] == game_id else 0
+        if count != before_count + 1:
+            return False
+        mover = "w" if count % 2 == 1 else "b"
+        return mover != learner
+
+    async def announce_chess_move(game_id: str) -> None:
+        """Reads Jacob's chess reply out loud. The move itself was already chosen
+        and stored by the text chat's activity-turn flow (/api/chat); this only
+        speaks the line that went with it, so the move is never made twice."""
+        for _ in range(8):
+            latest = await asyncio.to_thread(read_transcript, session_id)
+            entry = next(
+                (
+                    e
+                    for e in reversed(latest.entries if latest else [])
+                    if e.get("speaker") == "virtual_client"
+                    and e.get("actions")
+                    and str(e.get("activityTurnId", "")).startswith(game_id)
+                    and e.get("seq", 0) > baseline_seq
+                ),
+                None,
+            )
+            if entry is not None:
+                if entry["seq"] in spoken_chess_seqs or not entry.get("text", "").strip():
+                    return
+                spoken_chess_seqs.add(entry["seq"])
+                text = entry["text"].strip()
+                try:
+                    session.say(text, add_to_chat_ctx=False)
+                except RuntimeError as err:
+                    logger.info("Skipped chess narration: %s", err)
+                    return
+                # Keep what he said in his own history, without logging it
+                # twice (it is already in the transcript).
+                history = agent.chat_ctx.copy()
+                history.add_message(role="assistant", content=text)
+                await agent.update_chat_ctx(history)
+                return
+            await asyncio.sleep(0.5)
+        logger.info("No chess reply found in the transcript to read out loud")
+
     async def apply_activity(raw: str) -> None:
         nonlocal last_snapshot
         try:
@@ -181,15 +358,20 @@ async def entrypoint(ctx: JobContext) -> None:
             if not isinstance(snapshot, dict):
                 # The learner left the activity (back to the room / chat page).
                 last_snapshot = None
+                await agent.update_tools([])
                 await agent.update_instructions(persona.system_prompt)
                 return
 
-            # Same activity, different state = the learner changed something.
-            # A newly opened activity only updates context.
-            learner_changed = (
-                last_snapshot is not None
-                and last_snapshot.get("activityId") == snapshot.get("activityId")
+            # Same activity, different state = something changed. A newly
+            # opened activity only updates context, and so does the change
+            # Jacob's own tool call caused.
+            previous = last_snapshot
+            same_activity = (
+                previous is not None
+                and previous.get("activityId") == snapshot.get("activityId")
             )
+            own_change = same_activity and is_echo_of_own_action(snapshot)
+            learner_changed = same_activity and not own_change
             reactive = learner_changed and snapshot.get("activityId") in REACTIVE_ACTIVITIES
             try:
                 described = await asyncio.to_thread(
@@ -200,11 +382,23 @@ async def entrypoint(ctx: JobContext) -> None:
                 return
 
             last_snapshot = snapshot
-            await agent.update_instructions(
-                f"{persona.system_prompt}\n\n{described.context}\n"
-                f"{VOICE_ACTIVITY_LIMITS}"
+            limits = VOICE_ACTIVITY_LIMITS.get(
+                described.activity_id, DEFAULT_VOICE_ACTIVITY_LIMIT
             )
-            logger.info("Activity context updated: %s", described.activity_id)
+            voice_tools = (
+                build_voice_tools(described.tools)
+                if described.activity_id in VOICE_TOOL_ACTIVITIES
+                else []
+            )
+            await agent.update_tools(voice_tools)
+            await agent.update_instructions(
+                f"{persona.system_prompt}\n\n{described.context}\n{limits}"
+            )
+            logger.info(
+                "Activity context updated: %s (tools: %s)",
+                described.activity_id,
+                [t.info.name for t in voice_tools] or "none",  # type: ignore[attr-defined]
+            )
 
             if reactive:
                 try:
@@ -220,6 +414,12 @@ async def entrypoint(ctx: JobContext) -> None:
                     # The session is still starting or already closing; the
                     # context update above still applies to his next reply.
                     logger.info("Skipped activity reaction: %s", err)
+
+            if described.activity_id == "chess" and jacob_just_moved(previous, snapshot):
+                game_id = chess_progress(snapshot)[0]  # type: ignore[index]
+                task = asyncio.create_task(announce_chess_move(game_id))
+                background_tasks.add(task)
+                task.add_done_callback(background_tasks.discard)
 
     async def read_activity_stream(reader: rtc.TextStreamReader) -> None:
         await apply_activity(await reader.read_all())

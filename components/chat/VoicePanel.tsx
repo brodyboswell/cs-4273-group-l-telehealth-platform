@@ -16,6 +16,12 @@
  * the current ActivityBridge snapshot is sent on the "telehealth.activity"
  * topic whenever it changes (and again when the agent joins), so Jacob knows
  * what the learner is looking at and can react to feelings-chart selections.
+ *
+ * In the other direction, when Jacob uses an activity tool by voice (picking a
+ * feeling, drawing on the whiteboard) the agent has the server validate and
+ * record the action, then sends it here on the "telehealth.action" topic. It is
+ * applied with ActivityBridge.capture().dispatch(), the same path the text
+ * chat uses, so the activity component cannot tell the difference.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -28,12 +34,16 @@ import {
 } from "livekit-client";
 import { loadSessionId } from "@/lib/chat/clientSession";
 import { useActivityBridge } from "@/components/session/ActivityBridge";
+import type { ActivityAction } from "@/lib/activities/types";
+import { isRecord } from "@/lib/chat/validation";
 
 const TOPIC_TRANSCRIPTION = "lk.transcription";
 const ATTR_SEGMENT_ID = "lk.segment_id";
 const ATTR_FINAL = "lk.transcription_final";
 // Must match ACTIVITY_TOPIC in voice-agent/agent.py.
 const ACTIVITY_TOPIC = "telehealth.activity";
+// Must match ACTION_TOPIC in voice-agent/agent.py.
+const ACTION_TOPIC = "telehealth.action";
 // How often to check the ActivityBridge for changes during a call. The bridge
 // is read on demand (capture()), so polling avoids changing that shared
 // interface that every activity component uses.
@@ -108,6 +118,7 @@ export function VoicePanel({
     roomRef.current = null;
     if (room) {
       room.unregisterTextStreamHandler(TOPIC_TRANSCRIPTION);
+      room.unregisterTextStreamHandler(ACTION_TOPIC);
       room.disconnect();
     }
     if (audioContainerRef.current) audioContainerRef.current.innerHTML = "";
@@ -178,6 +189,16 @@ export function VoicePanel({
             next[idx] = line;
             return next;
           });
+        },
+      );
+
+      room.registerTextStreamHandler(
+        ACTION_TOPIC,
+        async (reader: TextStreamReader, participantInfo: { identity: string }) => {
+          // Only the agent sends actions; ignore anything from this browser.
+          if (participantInfo.identity === localIdentityRef.current) return;
+          const action = parseActionMessage(await reader.readAll());
+          if (action) activityBridge.capture().dispatch([action]);
         },
       );
 
@@ -304,4 +325,22 @@ export function VoicePanel({
       <div ref={audioContainerRef} className="hidden" aria-hidden />
     </div>
   );
+}
+
+/** Parses {"action": ActivityAction} from the agent; the server already validated it. */
+function parseActionMessage(raw: string): ActivityAction | null {
+  try {
+    const message: unknown = JSON.parse(raw);
+    if (!isRecord(message) || !isRecord(message.action)) return null;
+    const { activityId, tool, input } = message.action;
+    if (
+      typeof activityId !== "string" ||
+      typeof tool !== "string" ||
+      !isRecord(input)
+    )
+      return null;
+    return { activityId, tool, input };
+  } catch {
+    return null;
+  }
 }

@@ -22,11 +22,17 @@ class ActivityContextError(Exception):
     pass
 
 
+class ActivityActionError(Exception):
+    """The server rejected a tool call; the message is safe to show the LLM."""
+
+
 @dataclass
 class ActivityContext:
     activity_id: str
     label: str
     context: str
+    # Tools the registry offers in this state: [{name, description, inputSchema}].
+    tools: list[dict[str, Any]]
 
 
 def describe_activity(
@@ -63,6 +69,49 @@ def describe_activity(
             activity_id=data["activityId"],
             label=data["label"],
             context=data["context"],
+            tools=list(data.get("tools", [])),
         )
     except KeyError as err:
         raise ActivityContextError(f"Unexpected response shape from {url}: {data!r}") from err
+
+
+def submit_action(
+    session_id: str,
+    snapshot: dict[str, Any],
+    tool: str,
+    tool_input: dict[str, Any],
+    *,
+    base_url: str | None = None,
+    timeout: float = 15.0,
+) -> dict[str, Any]:
+    """Blocking call; run it with asyncio.to_thread from the agent.
+
+    POSTs an LLM tool call to /api/voice/action, which validates it with the
+    shared activity registry and records it in the transcript. Returns
+    {"action": ActivityAction, "text": str, "label": str}.
+    """
+    base = (base_url or os.environ.get("NEXTJS_BASE_URL") or "http://localhost:3000").rstrip(
+        "/"
+    )
+    url = f"{base}/api/voice/action"
+    payload = json.dumps(
+        {"sessionId": session_id, "activity": snapshot, "tool": tool, "input": tool_input}
+    )
+    request = urllib.request.Request(
+        url,
+        data=payload.encode("utf8"),
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf8"))
+    except urllib.error.HTTPError as err:
+        detail = err.read().decode("utf8", errors="replace")
+        try:
+            detail = json.loads(detail).get("error", detail)
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        raise ActivityActionError(str(detail)) from err
+    except Exception as err:  # noqa: BLE001 - surfaced to the LLM as a tool error
+        raise ActivityActionError(f"Could not reach {url}: {err}") from err
