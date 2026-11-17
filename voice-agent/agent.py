@@ -58,6 +58,7 @@ from activity_client import (
     describe_activity,
     submit_action,
 )
+from feeling_faces import MOOD_IDS, feeling_face_svg
 from persona_client import Persona, PersonaFetchError, fetch_persona
 from transcript_store import Transcript, append_entry, read_transcript
 
@@ -74,6 +75,60 @@ ACTIVITY_TOPIC = "telehealth.activity"
 
 # Must match ACTION_TOPIC in components/chat/VoicePanel.tsx.
 ACTION_TOPIC = "telehealth.action"
+
+# Must match NAVIGATE_TOPIC in components/chat/VoicePanel.tsx. The agent sends
+# {"open": "<activityId>"} and the browser switches to /practice/<id>/<activityId>.
+NAVIGATE_TOPIC = "telehealth.navigate"
+OPENABLE_ACTIVITIES = {
+    "feelings": "feelings chart",
+    "whiteboard": "whiteboard",
+    "chess": "chess board",
+}
+OPEN_ACTIVITY_COOLDOWN_SECONDS = 60.0
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.environ.get(name, "").strip().lower()
+    if not value:
+        return default
+    return value in ("1", "true", "yes", "on")
+
+
+# Lets the client open an activity on the learner's screen by voice
+# (open_activity tool). Set VOICE_CLIENT_OPENS_ACTIVITIES=false to turn off.
+CLIENT_OPENS_ACTIVITIES = _env_flag("VOICE_CLIENT_OPENS_ACTIVITIES", True)
+# When an activity opens during a call (by the learner or the client), the
+# client uses it once on their own: picks their feeling on the chart, or draws
+# a simple face on a blank whiteboard. Set VOICE_AUTO_ACTIVITY_ACTIONS=false
+# to turn off, e.g. for sessions where the learner should lead.
+AUTO_ACTIVITY_ACTIONS = _env_flag("VOICE_AUTO_ACTIVITY_ACTIONS", True)
+
+# activityId -> (tool to force, what to do). Runs at most once per activity per call.
+AUTO_ACTIONS: dict[str, tuple[str, str]] = {
+    "feelings": (
+        "select_mood",
+        "Show how you feel right now by choosing exactly one feeling on the chart with "
+        "select_mood, based on your case and the conversation so far (for example sad, "
+        "lonely, angry or worried, if that fits). Give a short first-person rationale.",
+    ),
+    "whiteboard": (
+        "draw_feeling_face",
+        "Show how you feel right now by drawing the matching face with draw_feeling_face. "
+        "Choose the feeling that fits your case and the conversation so far (for example "
+        "sad, lonely, angry or worried, if that fits); if you already picked a feeling on "
+        "the feelings chart in this conversation, draw that same one. The spokenText is "
+        "one short line, like 'This is kinda how I feel.'",
+    ),
+}
+
+OPEN_ACTIVITY_GUIDANCE = (
+    "During this voice call you can open an activity on the learner's screen with the "
+    "open_activity tool: the feelings chart to show how you feel, or the whiteboard to "
+    "draw it. It is natural to do this once fairly early in the conversation, when "
+    "feelings are hard to put into words, or whenever the learner suggests an activity. "
+    "Say a short line first, like 'Can I show you something?'. Do not open activities "
+    "again and again, and only open the chess board if the learner asks."
+)
 
 # Activities where a learner change should make Jacob respond out loud right
 # away. Other activities (chess, whiteboard) still update his context
@@ -98,16 +153,17 @@ ACTION_ECHO_SECONDS = 20.0
 VOICE_ACTIVITY_LIMITS: dict[str, str] = {
     "feelings": (
         "This is a voice call. You can only change the feelings chart by calling the "
-        "select_mood tool, and only when the learner asks you to show how you feel or "
-        "clearly agrees. Never say you picked a feeling unless the tool succeeded. "
+        "select_mood tool: when the chart first opens, or when the learner asks you to "
+        "show how you feel. Never say you picked a feeling unless the tool succeeded. "
         "After it succeeds, say one short sentence about why, in character."
     ),
     "whiteboard": (
-        "This is a voice call. You can only draw by calling the "
-        "replace_whiteboard_with_svg tool, and only after the learner directly asks "
-        "or clearly agrees. Say one short sentence about what you will draw before "
-        "you call it, and never claim to have drawn something unless the tool "
-        "succeeded. Drawing replaces the whole board."
+        "This is a voice call. To draw how you feel, use draw_feeling_face (when the "
+        "blank board first opens, or when the learner asks). For any other drawing the "
+        "learner asks for, use replace_whiteboard_with_svg. Never claim to have drawn "
+        "something unless the tool succeeded, and make what you say match the feeling "
+        "you drew. Drawing replaces the whole board, so do not draw over the learner's "
+        "marks unless they ask."
     ),
     "chess": (
         "This is a voice call. You cannot move pieces yourself: after the learner "
@@ -158,8 +214,10 @@ class VirtualClientAgent(Agent):
     """Carries the persona's instructions and primed history; activity context
     is added on top of the persona prompt by the entrypoint as it changes."""
 
-    def __init__(self, *, instructions: str, chat_ctx: llm.ChatContext) -> None:
-        super().__init__(instructions=instructions, chat_ctx=chat_ctx)
+    def __init__(
+        self, *, instructions: str, chat_ctx: llm.ChatContext, tools: list[llm.Tool]
+    ) -> None:
+        super().__init__(instructions=instructions, chat_ctx=chat_ctx, tools=tools)
 
 
 @server.rtc_session()
@@ -209,8 +267,6 @@ async def entrypoint(ctx: JobContext) -> None:
         llm=anthropic.LLM(model=ANTHROPIC_MODEL),
     )
 
-    agent = VirtualClientAgent(instructions=persona.system_prompt, chat_ctx=chat_ctx)
-
     # --- On-screen activity -------------------------------------------------
     # The browser sends {"activity": ActivitySnapshot | null} whenever the
     # visible activity or its state changes. Updates are applied one at a time
@@ -229,6 +285,104 @@ async def entrypoint(ctx: JobContext) -> None:
     spoken_chess_seqs: set[int] = set()
     baseline_seq = len(transcript.entries)
 
+    # Auto-actions already done this call, the activity the client opened
+    # himself (if any), and when he last opened one.
+    auto_acted: set[str] = set()
+    opened_by_client: str | None = None
+    last_open_at = 0.0
+    # Set once the session has started (and the opening line is queued), so an
+    # auto-action for an activity that was already open waits its turn.
+    session_started = asyncio.Event()
+
+    def compose_instructions(activity_context: str | None = None) -> str:
+        parts = [persona.system_prompt]
+        if CLIENT_OPENS_ACTIVITIES:
+            parts.append(OPEN_ACTIVITY_GUIDANCE)
+        if activity_context:
+            parts.append(activity_context)
+        return "\n\n".join(parts)
+
+    async def open_activity(raw_arguments: dict[str, Any]) -> str:
+        """Switches the learner's screen to an activity (VoicePanel navigates)."""
+        nonlocal opened_by_client, last_open_at
+        target = raw_arguments.get("activity")
+        if target not in OPENABLE_ACTIVITIES:
+            raise llm.ToolError("Choose one of: " + ", ".join(OPENABLE_ACTIVITIES))
+        label = OPENABLE_ACTIVITIES[target]
+        if last_snapshot is not None and last_snapshot.get("activityId") == target:
+            return f"The {label} is already open on the learner's screen."
+        if time.monotonic() - last_open_at < OPEN_ACTIVITY_COOLDOWN_SECONDS:
+            raise llm.ToolError("You just opened an activity. Stay with it for now.")
+        last_open_at = time.monotonic()
+        opened_by_client = target
+        await ctx.room.local_participant.send_text(
+            json.dumps({"open": target}), topic=NAVIGATE_TOPIC
+        )
+        logger.info("Client opened activity: %s", target)
+        return (
+            f"The {label} is opening on the learner's screen; you will use it in a moment. "
+            "For now say at most one short line, without describing your choice or drawing yet."
+        )
+
+    base_tools: list[llm.Tool] = []
+    if CLIENT_OPENS_ACTIVITIES:
+        base_tools.append(
+            llm.function_tool(
+                open_activity,
+                raw_schema={
+                    "name": "open_activity",
+                    "description": (
+                        "Open an activity on the learner's screen: the feelings chart to "
+                        "show how you feel, the whiteboard to draw it, or the chess board "
+                        "only if the learner asks to play."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "activity": {
+                                "type": "string",
+                                "enum": list(OPENABLE_ACTIVITIES),
+                                "description": "Which activity to open.",
+                            }
+                        },
+                        "required": ["activity"],
+                        "additionalProperties": False,
+                    },
+                },
+            )
+        )
+
+    def auto_action_allowed(snapshot: dict[str, Any]) -> bool:
+        """Only on a fresh activity: no feeling chosen yet / a blank board."""
+        state = snapshot.get("state")
+        if not isinstance(state, dict):
+            return False
+        if snapshot.get("activityId") == "feelings":
+            return state.get("selectedMoodId") is None
+        if snapshot.get("activityId") == "whiteboard":
+            return state.get("hasContent") is False
+        return False
+
+    async def run_auto_action(activity_id: str, tool_name: str, task: str, by_client: bool) -> None:
+        await session_started.wait()
+        # Let the page settle and any line already being spoken get queued first.
+        await asyncio.sleep(0.5)
+        if last_snapshot is None or last_snapshot.get("activityId") != activity_id:
+            return  # the learner already left the activity
+        who = (
+            "You just opened it yourself to show the learner how you feel."
+            if by_client
+            else "The learner just opened it."
+        )
+        try:
+            session.generate_reply(
+                instructions=f"The {OPENABLE_ACTIVITIES[activity_id]} is now open. {who} {task}",
+                tool_choice={"type": "function", "function": {"name": tool_name}},
+            )
+            logger.info("Auto-action started: %s.%s", activity_id, tool_name)
+        except RuntimeError as err:
+            logger.info("Skipped auto-action: %s", err)
+
     def is_echo_of_own_action(snapshot: dict[str, Any]) -> bool:
         nonlocal pending_self_change
         pending, pending_self_change = pending_self_change, None
@@ -240,6 +394,79 @@ async def entrypoint(ctx: JobContext) -> None:
         return isinstance(state, dict) and all(
             state.get(key) == value for key, value in pending["state"].items()
         )
+
+    async def perform_action(tool_name: str, tool_input: dict[str, Any]) -> str:
+        """Has the server validate and record one registry tool call, then sends
+        the validated action to the browser to apply."""
+        nonlocal pending_self_change
+        snapshot = last_snapshot
+        if snapshot is None:
+            raise llm.ToolError("There is nothing on screen to act on right now.")
+        try:
+            result = await asyncio.to_thread(
+                submit_action, session_id, snapshot, tool_name, tool_input
+            )
+        except ActivityActionError as err:
+            logger.warning("Activity tool %s rejected: %s", tool_name, err)
+            raise llm.ToolError(f"The action was not applied: {err}") from err
+
+        action = result["action"]
+        expected = EXPECTED_STATE_AFTER_TOOL.get(tool_name)
+        if expected is not None:
+            pending_self_change = {
+                "activityId": action["activityId"],
+                "state": expected(action["input"]),
+                "until": time.monotonic() + ACTION_ECHO_SECONDS,
+            }
+        await ctx.room.local_participant.send_text(
+            json.dumps({"action": action}), topic=ACTION_TOPIC
+        )
+        logger.info("Activity action sent: %s.%s", action["activityId"], tool_name)
+        return f"Done: the {result.get('label', 'activity')} was updated on screen."
+
+    async def draw_feeling_face(raw_arguments: dict[str, Any]) -> str:
+        """Draws a ready-made face for one feeling (voice-agent/feeling_faces.py),
+        sent as a normal whiteboard SVG action so the server still sanitizes it."""
+        mood_id = raw_arguments.get("moodId")
+        spoken = str(raw_arguments.get("spokenText", "")).strip()[:180]
+        if mood_id not in MOOD_IDS:
+            raise llm.ToolError("Choose one of: " + ", ".join(MOOD_IDS))
+        if not spoken:
+            raise llm.ToolError("Add one short spokenText line about the face.")
+        await perform_action(
+            "replace_whiteboard_with_svg",
+            {"svg": feeling_face_svg(mood_id), "spokenText": spoken},
+        )
+        return f"Done: a {mood_id} face is now on the whiteboard."
+
+    feeling_face_tool = llm.function_tool(
+        draw_feeling_face,
+        raw_schema={
+            "name": "draw_feeling_face",
+            "description": (
+                "Draw a simple face on the whiteboard that shows one feeling. Use this "
+                "(not replace_whiteboard_with_svg) whenever you draw how you feel. "
+                "This replaces the whole board."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "moodId": {
+                        "type": "string",
+                        "enum": list(MOOD_IDS),
+                        "description": "The feeling the face shows.",
+                    },
+                    "spokenText": {
+                        "type": "string",
+                        "maxLength": 180,
+                        "description": "One short first-person line about the face.",
+                    },
+                },
+                "required": ["moodId", "spokenText"],
+                "additionalProperties": False,
+            },
+        },
+    )
 
     def build_voice_tools(specs: list[dict[str, Any]]) -> list[llm.Tool]:
         """Turns the registry's tool definitions into LiveKit raw-schema tools.
@@ -253,31 +480,7 @@ async def entrypoint(ctx: JobContext) -> None:
                 raw_arguments: dict[str, Any],
                 _name: str = name,
             ) -> str:
-                nonlocal pending_self_change
-                snapshot = last_snapshot
-                if snapshot is None:
-                    raise llm.ToolError("There is nothing on screen to act on right now.")
-                try:
-                    result = await asyncio.to_thread(
-                        submit_action, session_id, snapshot, _name, raw_arguments
-                    )
-                except ActivityActionError as err:
-                    logger.warning("Activity tool %s rejected: %s", _name, err)
-                    raise llm.ToolError(f"The action was not applied: {err}") from err
-
-                action = result["action"]
-                expected = EXPECTED_STATE_AFTER_TOOL.get(_name)
-                if expected is not None:
-                    pending_self_change = {
-                        "activityId": action["activityId"],
-                        "state": expected(action["input"]),
-                        "until": time.monotonic() + ACTION_ECHO_SECONDS,
-                    }
-                await ctx.room.local_participant.send_text(
-                    json.dumps({"action": action}), topic=ACTION_TOPIC
-                )
-                logger.info("Activity action sent: %s.%s", action["activityId"], _name)
-                return f"Done: the {result.get('label', 'activity')} was updated on screen."
+                return await perform_action(_name, raw_arguments)
 
             tools.append(
                 llm.function_tool(
@@ -354,7 +557,7 @@ async def entrypoint(ctx: JobContext) -> None:
         logger.info("No chess reply found in the transcript to read out loud")
 
     async def apply_activity(raw: str) -> None:
-        nonlocal last_snapshot
+        nonlocal last_snapshot, opened_by_client
         try:
             message = json.loads(raw)
             snapshot = message.get("activity") if isinstance(message, dict) else None
@@ -368,8 +571,8 @@ async def entrypoint(ctx: JobContext) -> None:
             if not isinstance(snapshot, dict):
                 # The learner left the activity (back to the room / chat page).
                 last_snapshot = None
-                await agent.update_tools([])
-                await agent.update_instructions(persona.system_prompt)
+                await agent.update_tools(list(base_tools))
+                await agent.update_instructions(compose_instructions())
                 return
 
             # Same activity, different state = something changed. A newly
@@ -400,10 +603,12 @@ async def entrypoint(ctx: JobContext) -> None:
                 if described.activity_id in VOICE_TOOL_ACTIVITIES
                 else []
             )
-            await agent.update_tools(voice_tools)
-            await agent.update_instructions(
-                f"{persona.system_prompt}\n\n{described.context}\n{limits}"
-            )
+            if any(
+                spec.get("name") == "replace_whiteboard_with_svg" for spec in described.tools
+            ) and described.activity_id in VOICE_TOOL_ACTIVITIES:
+                voice_tools.append(feeling_face_tool)
+            await agent.update_tools([*base_tools, *voice_tools])
+            await agent.update_instructions(compose_instructions(f"{described.context}\n{limits}"))
             logger.info(
                 "Activity context updated: %s (tools: %s)",
                 described.activity_id,
@@ -431,6 +636,26 @@ async def entrypoint(ctx: JobContext) -> None:
                 background_tasks.add(task)
                 task.add_done_callback(background_tasks.discard)
 
+            # A freshly opened feelings chart or blank whiteboard: the client
+            # uses it once on their own, so the learner sees how they feel.
+            auto = AUTO_ACTIONS.get(described.activity_id)
+            if (
+                AUTO_ACTIVITY_ACTIONS
+                and auto is not None
+                and not same_activity
+                and described.activity_id not in auto_acted
+                and auto_action_allowed(snapshot)
+                and any(t.info.name == auto[0] for t in voice_tools)  # type: ignore[attr-defined]
+            ):
+                auto_acted.add(described.activity_id)
+                by_client = opened_by_client == described.activity_id
+                opened_by_client = None
+                task = asyncio.create_task(
+                    run_auto_action(described.activity_id, auto[0], auto[1], by_client)
+                )
+                background_tasks.add(task)
+                task.add_done_callback(background_tasks.discard)
+
     async def read_activity_stream(reader: rtc.TextStreamReader) -> None:
         await apply_activity(await reader.read_all())
 
@@ -439,6 +664,9 @@ async def entrypoint(ctx: JobContext) -> None:
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
 
+    agent = VirtualClientAgent(
+        instructions=compose_instructions(), chat_ctx=chat_ctx, tools=list(base_tools)
+    )
     ctx.room.register_text_stream_handler(ACTIVITY_TOPIC, on_activity_stream)
 
     # --- Transcript logging ---------------------------------------------------
@@ -491,6 +719,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # transcript's "scripted:opening-line" entry.
     if is_new_session:
         session.say(persona.opening_line, add_to_chat_ctx=False)
+    session_started.set()
 
 
 if __name__ == "__main__":

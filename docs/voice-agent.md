@@ -165,7 +165,17 @@ voice-agent/agent.py --LiveKit topic "telehealth.action"--> VoicePanel --capture
   The tools come from the registry, so a new activity only needs to be added to that set. The change
   his own tool call causes on screen is not treated as a learner change (`pending_self_change`), so he
   does not react to himself or log it as an `activity` entry.
-- The whiteboard is not reactive; Jacob draws only when the learner asks, and drawing replaces the board.
+- When the feelings chart or a blank whiteboard opens during a call (opened by the learner or by the
+  client), the client uses it once on their own: picks their feeling, or draws a simple feelings face
+  (`AUTO_ACTIONS`, a forced tool call). It never draws over a board that already has marks.
+  Feelings faces come from `voice-agent/feeling_faces.py` (one ready-made face per feelings-chart
+  option, tool `draw_feeling_face`): the model only picks the feeling, because model-written SVG often
+  curved the mouth the wrong way. The face still goes through `/api/voice/action` and the sanitizer.
+  Turn off with `VOICE_AUTO_ACTIVITY_ACTIONS=false` in `voice-agent/.env`.
+- The client can open an activity on the learner's screen with the `open_activity` tool (sent on
+  topic `telehealth.navigate`; VoicePanel switches to `/practice/<sessionId>/<activity>`), at most once
+  a minute, and chess only if the learner asks. Turn off with `VOICE_CLIENT_OPENS_ACTIVITIES=false`.
+- The whiteboard is not reactive to learner marks; besides the opening face, the client draws only when the learner asks, and drawing replaces the board.
 - Chess is deliberately not a voice tool: after each learner move the hidden ChatPanel still requests
   Jacob's move through `/api/chat` (shown in the Text tab), and the voice agent reads that stored reply
   out loud (`announce_chess_move`), so the move is never made twice.

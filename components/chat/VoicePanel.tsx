@@ -22,8 +22,14 @@
  * record the action, then sends it here on the "telehealth.action" topic. It is
  * applied with ActivityBridge.capture().dispatch(), the same path the text
  * chat uses, so the activity component cannot tell the difference.
+ *
+ * The client can also open an activity by voice (the agent's open_activity
+ * tool): the agent sends {"open": activityId} on "telehealth.navigate" and the
+ * page switches to that activity. The call keeps running because this panel
+ * lives in the session layout, which stays mounted across activity pages.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ConnectionState,
   Room,
@@ -43,6 +49,10 @@ const ATTR_FINAL = "lk.transcription_final";
 const ACTIVITY_TOPIC = "telehealth.activity";
 // Must match ACTION_TOPIC in voice-agent/agent.py.
 const ACTION_TOPIC = "telehealth.action";
+// Must match NAVIGATE_TOPIC in voice-agent/agent.py.
+const NAVIGATE_TOPIC = "telehealth.navigate";
+// Activity pages the client may open, under /practice/<sessionId>/.
+const OPENABLE_ACTIVITIES = new Set(["feelings", "whiteboard", "chess"]);
 // How often to check the ActivityBridge for changes during a call. The bridge
 // is read on demand (capture()), so polling avoids changing that shared
 // interface that every activity component uses.
@@ -76,6 +86,7 @@ export function VoicePanel({
   const localIdentityRef = useRef<string | null>(null);
   const captionsRef = useRef<HTMLDivElement>(null);
   const activityBridge = useActivityBridge();
+  const router = useRouter();
   const lastSentActivityRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -121,6 +132,7 @@ export function VoicePanel({
     if (room) {
       room.unregisterTextStreamHandler(TOPIC_TRANSCRIPTION);
       room.unregisterTextStreamHandler(ACTION_TOPIC);
+      room.unregisterTextStreamHandler(NAVIGATE_TOPIC);
       room.disconnect();
     }
     if (audioContainerRef.current) audioContainerRef.current.innerHTML = "";
@@ -200,6 +212,16 @@ export function VoicePanel({
           if (participantInfo.identity === localIdentityRef.current) return;
           const action = parseActionMessage(await reader.readAll());
           if (action) activityBridge.capture().dispatch([action]);
+        },
+      );
+
+      room.registerTextStreamHandler(
+        NAVIGATE_TOPIC,
+        async (reader: TextStreamReader, participantInfo: { identity: string }) => {
+          if (participantInfo.identity === localIdentityRef.current) return;
+          const activityId = parseOpenMessage(await reader.readAll());
+          if (activityId)
+            router.push(`/practice/${encodeURIComponent(sessionId)}/${activityId}`);
         },
       );
 
@@ -341,6 +363,17 @@ function parseActionMessage(raw: string): ActivityAction | null {
     )
       return null;
     return { activityId, tool, input };
+  } catch {
+    return null;
+  }
+}
+
+/** Parses {"open": activityId} from the agent; only known activity pages are opened. */
+function parseOpenMessage(raw: string): string | null {
+  try {
+    const message: unknown = JSON.parse(raw);
+    if (!isRecord(message) || typeof message.open !== "string") return null;
+    return OPENABLE_ACTIVITIES.has(message.open) ? message.open : null;
   } catch {
     return null;
   }
