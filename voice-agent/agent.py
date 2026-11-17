@@ -49,6 +49,7 @@ from livekit.agents import (
     inference,
     llm,
 )
+from livekit.agents.voice import room_io
 from livekit.plugins import anthropic
 
 from activity_client import (
@@ -473,7 +474,15 @@ async def entrypoint(ctx: JobContext) -> None:
                 latency_ms=latency_ms,
             )
 
-    await session.start(agent=agent, room=ctx.room)
+    await session.start(
+        agent=agent,
+        room=ctx.room,
+        # When the learner presses "End voice session", the session closes;
+        # also delete the room, otherwise this agent stays in it and a call
+        # started again soon after rejoins a room with no one listening. The
+        # next call then creates a fresh room and gets a fresh agent.
+        room_options=room_io.RoomOptions(delete_room_on_close=True),
+    )
 
     # Only a session where the learner hasn't spoken yet hears the scripted
     # opening line out loud; resuming one (learner switched from Text to Voice
