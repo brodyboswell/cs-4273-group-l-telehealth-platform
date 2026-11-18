@@ -308,7 +308,7 @@ export function WhiteboardCanvas() {
 				)}
 				{animation && (
 					<div
-						className="pointer-events-none absolute inset-0 z-10 grid cursor-wait place-items-center"
+						className="absolute inset-0 z-10 grid cursor-wait place-items-center bg-white"
 						aria-hidden="true"
 					>
 						<div
@@ -431,9 +431,12 @@ async function animateAndAddSvgImage(
 			if (!isActive()) return;
 		}
 
-		setAnimation(null);
 		await addSvgImage(api, svg, layout, isActive);
 		if (!isActive()) return;
+		// Keep the old scene covered until Excalidraw has painted its replacement.
+		await waitForPaint();
+		if (!isActive()) return;
+		setAnimation(null);
 		onApplied();
 	} catch (error) {
 		if (!isActive()) return;

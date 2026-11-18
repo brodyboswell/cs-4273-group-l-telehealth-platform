@@ -59,7 +59,8 @@ describe('activity registry', () => {
 
 		assert.match(activity.description, /already has content/);
 		assert.match(activity.description, /directly asks/);
-		assert.match(activity.description, /small, childlike SVG doodle/);
+		assert.match(activity.tools[0].description, /small, childlike SVG doodle/);
+		assert.doesNotMatch(activity.description, /small, childlike SVG doodle/);
 		assert.deepEqual(
 			activity.tools.map((tool) => tool.name),
 			['replace_whiteboard_with_svg'],
