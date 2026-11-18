@@ -358,6 +358,39 @@ describe("chat HTTP endpoints", () => {
     }
   });
 
+  it("does not claim a rejected whiteboard drawing succeeded", async (context) => {
+    await getOrCreateTranscript("whiteboard-rejected-action", DEFAULT_PERSONA, "learner-one");
+    const previousProvider = process.env.LLM_PROVIDER;
+    const previousKey = process.env.ANTHROPIC_API_KEY;
+    context.mock.method(globalThis, "fetch", async () => Response.json({
+      model: "test-model",
+      content: [
+        { type: "text", text: "I drew an angry face." },
+        { type: "tool_use", name: "replace_whiteboard_with_svg", input: { svg: "", spokenText: "I drew it." } },
+      ],
+    }));
+    try {
+      process.env.LLM_PROVIDER = "anthropic";
+      process.env.ANTHROPIC_API_KEY = "test-key";
+      const response = await post({
+        sessionId: "whiteboard-rejected-action",
+        message: "Draw an angry face again.",
+        activity: { activityId: "whiteboard", state: { hasContent: false } },
+      });
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.match(data.reply.text, /couldn't complete/);
+      assert.equal(data.reply.actions, undefined);
+      assert.ok(data.transcript.entries.some((entry: { speaker: string; text: string }) =>
+        entry.speaker === "system" && entry.text.startsWith("Rejected activity tool call")));
+    } finally {
+      if (previousProvider === undefined) delete process.env.LLM_PROVIDER;
+      else process.env.LLM_PROVIDER = previousProvider;
+      if (previousKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = previousKey;
+    }
+  });
+
   it("runs an idempotent chess client turn and logs the learner move separately from speech", async () => {
     const game = new Chess();
     game.move({ from: "e2", to: "e4" });
