@@ -1,9 +1,16 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseConfig } from "./lib/supabase/config";
+import { VOICE_AGENT_ROUTES } from "./lib/voice/agentRoutes";
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
+  // The Python voice agent has no user session; these routes check the shared
+  // VOICE_AGENT_SECRET themselves (lib/voice/agentAuth.ts).
+  if (VOICE_AGENT_ROUTES.includes(request.nextUrl.pathname)) {
+    response.headers.set("Cache-Control", "private, no-store");
+    return response;
+  }
   const isApi = request.nextUrl.pathname.startsWith("/api/");
   const isAuthPage = request.nextUrl.pathname === "/login" || request.nextUrl.pathname === "/signup";
   const noStore = (result: NextResponse) => {

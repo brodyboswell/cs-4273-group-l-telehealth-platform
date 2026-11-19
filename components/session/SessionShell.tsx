@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { VoicePanel } from "@/components/chat/VoicePanel";
 import { ActivityBridgeProvider } from "./ActivityBridge";
 import { FaceCams } from "./FaceCams";
 import { SessionHeader } from "./SessionHeader";
@@ -86,6 +87,7 @@ function ActiveSessionShell({
   const mobileChatExpanded = sideChatPage && expandedChatPath === pathname;
   const chatTabRef = useRef<HTMLButtonElement>(null);
   const closeChatRef = useRef<HTMLButtonElement>(null);
+  const [voiceMode, setVoiceMode] = useState(false);
 
   useEffect(() => {
     setExpandedChatPath(null);
@@ -181,12 +183,56 @@ function ActiveSessionShell({
                       Close
                     </button>
                   </div>
-                  <ChatPanel
-                    sessionId={sessionId}
-                    userId={userId}
-                    browserSession={browserSession}
-                    compact={sideChatPage}
-                  />
+                  {/* Voice needs the server-side transcript files the agent writes
+                      to, so it is offered only in file storage mode. */}
+                  {!browserSession && (
+                    <div className="flex shrink-0 gap-1 border-b border-charcoal/10 bg-white px-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setVoiceMode(false)}
+                        aria-pressed={!voiceMode}
+                        className={`rounded-t-panel px-3 py-1.5 text-xs font-semibold ${
+                          voiceMode
+                            ? "text-charcoal/50 hover:text-charcoal"
+                            : "border-b-2 border-charcoal text-charcoal"
+                        }`}
+                      >
+                        Text
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVoiceMode(true)}
+                        aria-pressed={voiceMode}
+                        className={`rounded-t-panel px-3 py-1.5 text-xs font-semibold ${
+                          voiceMode
+                            ? "border-b-2 border-charcoal text-charcoal"
+                            : "text-charcoal/50 hover:text-charcoal"
+                        }`}
+                      >
+                        Voice
+                      </button>
+                    </div>
+                  )}
+                  {/* Both panels mount together and voice mode is hidden rather than
+                      unmounted, so an in-progress call survives a tab switch; stopping
+                      it is an explicit "End voice session" action in VoicePanel. */}
+                  <div className={voiceMode ? "hidden" : "contents"}>
+                    <ChatPanel
+                      sessionId={sessionId}
+                      userId={userId}
+                      browserSession={browserSession}
+                      compact={sideChatPage}
+                    />
+                  </div>
+                  {!browserSession && (
+                    <div className={voiceMode ? "contents" : "hidden"}>
+                      <VoicePanel
+                        sessionId={sessionId}
+                        personaName={client.name}
+                        onEnded={() => setVoiceMode(false)}
+                      />
+                    </div>
+                  )}
                 </div>
               </aside>
             </div>

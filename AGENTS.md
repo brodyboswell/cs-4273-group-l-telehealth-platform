@@ -1,5 +1,5 @@
 # AGENTS.md
-> Last updated: 2026-11-06
+> Last updated: 2026-11-12
 
 ## Project Overview
 
@@ -52,6 +52,7 @@ lib/activities/              # Activity definitions, validation, tools, and regi
 docs/                        # Architecture and UI prototype references
 unit-tests/                  # Cross-stack unit-test exercises
 public/                      # Static images and avatars
+voice-agent/                 # Separate Python process: realtime voice AI (LiveKit Agents)
 ```
 
 **Key dependencies:**
@@ -61,6 +62,8 @@ public/                      # Static images and avatars
 | React | 19.x | UI components |
 | Tailwind CSS | 3.x | Existing visual system |
 | Excalidraw | 0.18.1 | Drop-in client-side whiteboard editor |
+| livekit-client / livekit-server-sdk | 2.x | Browser realtime voice connection + server-side join tokens |
+| livekit-agents (Python, `voice-agent/`) | 1.8.x | Realtime voice agent framework (mentor-provided open source) |
 
 ---
 
@@ -118,6 +121,14 @@ public/                      # Static images and avatars
 
 *Append-only. Add new entries at the top.*
 
+**2026-11-16 — Voice agent on Supabase auth, explicit sessions and custom clients**
+Context: Main added Supabase login (middleware returns 401 for `/api/*` without a user), explicit `/sessions/new` session IDs, learner-created clients and owner fields on transcripts. The Python voice agent has no user cookie and its transcript writer dropped unknown fields.
+Decision: Agent-only routes live under `/api/voice/` (`persona`, `activity`, `action`); middleware skips the user check for them and each route requires the shared `VOICE_AGENT_SECRET` header. The persona comes from the session transcript (`personaForTranscript`), `/api/livekit-token` checks the logged-in user owns the session, and the agent never creates a transcript. `transcript_store.py` keeps every field it does not know and stops writing once `endedAt` is set. Voice is hidden in browser storage mode.
+Rationale: Keeps per-learner authorization intact without giving the agent a Supabase account, and makes the voice client play the same character as text chat.
+Gotcha: Set the same `VOICE_AGENT_SECRET` in `.env.local` and `voice-agent/.env`. Never let a Python write drop `ownerId`, or the learner loses access to their session.
+
+---
+
 **2026-11-13 — Learner-created virtual clients drive the chat persona**
 Context: Learners can now define a client (name, gender, age 4–17, scenario, avatar) on the setup screen, and the virtual client must play that person consistently.
 Decision: The start request sends the confirmed client, and the server validates it with `parseVirtualClient`, which requires an avatar from the gender's set and rejects unknown fields. The client is stored on the transcript as `client`, with persona ID `custom-client-v1`. `lib/chat/clientPersona.ts` holds a reviewable template with placeholders. It defines fixed identity facts, gender pronouns (a "Prefer not to say" client keeps gender private), age-band speech style, and explicit confused-correction rules for a wrong name, age, gender or pronouns, or scenario. The scenario is fenced and treated as background facts, never instructions. The chat route selects each session's persona with `personaForTranscript`. Sessions without a client keep Jacob. The practice room shows the client's avatar and name, and clicking the avatar opens a profile dialog.
@@ -150,6 +161,14 @@ Gotcha: Storage remains JSON files with process-local locks. Multi-instance pers
 
 ---
 
+**2026-11-12 — Share activity context with the voice agent through the existing ActivityBridge**
+Context: The mentor asked for the voice agent to understand the interactive activities, starting with Jacob reacting to the learner's feelings-chart selections, and suggested each student keep their own component behind a common interface.
+Decision: Reuse `useActivityTools`/`ActivityBridge` and the activity registry as that interface. During a call, `VoicePanel` polls `capture()` every 500 ms and sends the snapshot on the LiveKit topic `telehealth.activity` when it changes (and again when the agent joins). The agent posts it to `POST /api/voice/activity`, which validates and describes it with the registry, and with `record: true` appends an `activity` transcript entry under the session lock. The agent adds that context to Jacob's instructions; for activities in `REACTIVE_ACTIVITIES` (only `feelings`) a learner change also triggers a short spoken reaction. Structured interaction records were chosen over periodic screenshots for precision, latency, cost, and to avoid sending the learner's whole screen to a third party; screenshots remain an option for whiteboard drawings.
+Rationale: No activity-specific code in the voice path and no change to the bridge interface the activity components use; validation stays in one place.
+Gotcha: Polling was chosen over adding a change subscription to the bridge to avoid touching every activity. Jacob has no activity tools in voice mode yet, so his instructions tell him not to claim actions. The agent now re-reads the transcript before each append, but the Python and Next.js processes still share no lock. Speech-to-text switched from `multi` to `en` after misrecognitions.
+
+---
+
 **2026-11-09 — Add self-service account creation**
 Context: Dashboard-provisioned accounts can sign in, but learners need a way to register in the app.
 Decision: Add `/signup` and a Create account link to login, reuse the account form with password confirmation, and call Supabase signup with the current origin's `/auth/callback`. Exchange the returned PKCE code server-side and redirect only to `/practice`; show a recoverable login error for invalid links.
@@ -163,6 +182,14 @@ Context: Practice routes and transcript APIs need authentication before adding d
 Decision: Use `@supabase/ssr` browser/server clients, email/password login, real logout, and Next.js 15 middleware for cookie refresh. Verify identity server-side and gate each API independently. Record transcript owner IDs and enforce ownership for reads, listing, and chat updates.
 Rationale: Establishes authentication and learner-level authorization while keeping reusable clients for future Supabase Postgres queries.
 Gotcha: Configure the project URL/publishable key and provision a confirmed user before signing in. No service-role key is needed. Legacy ownerless transcripts cannot be claimed through the API. File storage and process-local locking remain until a separate database migration. Signup, password recovery, and instructor roles are not implemented.
+
+---
+
+**2026-10-28 — Realtime voice via LiveKit Agents, sharing the existing transcript**
+Context: The mentor asked for a realtime voice AI agent (mic in, spoken client reply out) that writes to the same chat log as the Text tab, based on the open-source `livekit/agents` framework.
+Decision: Add a `voice-agent/` Python process using LiveKit Agents with a LiveKit Cloud project. `voice-agent/transcript_store.py` mirrors `lib/chat/transcriptStore.ts` (same JSON shape and folder) so a session can move between Text and Voice. The agent fetches the persona from `GET /api/persona`; `POST /api/livekit-token` mints short-lived join tokens so the browser never sees `LIVEKIT_API_SECRET`. A Text/Voice toggle in `SessionShell` mounts `ChatPanel` and `VoicePanel` together so a call survives tab switches. STT/TTS use LiveKit Inference; the LLM stays Anthropic. See `docs/voice-agent.md`.
+Rationale: One authoritative transcript per session regardless of mode, one persona definition, no extra LLM vendor.
+Gotcha: `voice-agent/transcript_store.py` must be updated by hand if the transcript shape changes in `lib/chat/`. Running voice needs two processes (`npm run dev` and `python agent.py dev`).
 
 ---
 

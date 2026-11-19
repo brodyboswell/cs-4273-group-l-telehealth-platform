@@ -1,6 +1,7 @@
 unit-tests/typescript/node_modules/
 **/__pycache__/
 *.pyc
+voice-agent/.venv/
 
 # Next.js
 node_modules/
